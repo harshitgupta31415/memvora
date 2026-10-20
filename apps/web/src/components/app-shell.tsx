@@ -16,6 +16,7 @@ const navigation: { href: string; label: string; icon: IconName }[] = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const isSourceView = pathname.startsWith('/sources/');
   const current = [...navigation, { href: '/settings', label: 'Settings' }].find((item) =>
     item.href === '/' ? pathname === '/' : pathname.startsWith(item.href),
   );
@@ -55,7 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               key={item.href}
               href={item.href}
               onClick={() => setOpen(false)}
-              className={`nav-item ${(item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)) ? 'active' : ''}`}
+              className={`nav-item ${(item.href === '/' ? pathname === '/' : pathname.startsWith(item.href) || (item.href === '/repositories' && isSourceView)) ? 'active' : ''}`}
               aria-current={
                 (item.href === '/' ? pathname === '/' : pathname.startsWith(item.href))
                   ? 'page'
@@ -105,7 +106,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
             <span>Workspace</span>
             <Icon name="chevron" size={12} />
-            <strong>{current?.label ?? 'Evidence detail'}</strong>
+            <strong>
+              {isSourceView ? 'Repository source' : (current?.label ?? 'Evidence detail')}
+            </strong>
           </div>
           <div className="topbar-right">
             <span className="local-pill">

@@ -23,6 +23,9 @@ import {
   RecallAnswerSchema,
   RepositoryListSchema,
   RepositoryResponseSchema,
+  RepositorySourceRangeQuerySchema,
+  RepositorySourceResponseSchema,
+  RepositorySourceSearchResponseSchema,
   RetryJobSchema,
   SearchRequestSchema,
   SearchResponseSchema,
@@ -274,6 +277,32 @@ export function buildApp(options: AppOptions = {}) {
     '/v1/memories/:id',
     { schema: { params: idParams, response: { 200: MemoryResponseSchema } } },
     async (request) => ({ memory: store.getMemory(service.context(), request.params.id) }),
+  );
+  app.post(
+    '/v1/repository-sources/search',
+    {
+      schema: {
+        body: SearchRequestSchema,
+        response: { 200: RepositorySourceSearchResponseSchema },
+      },
+    },
+    async (request) => ({
+      items: store.searchRepositorySources(service.context(), request.body),
+      requestId: request.id,
+    }),
+  );
+  app.get(
+    '/v1/repository-sources/:id',
+    {
+      schema: {
+        params: idParams,
+        querystring: RepositorySourceRangeQuerySchema,
+        response: { 200: RepositorySourceResponseSchema },
+      },
+    },
+    async (request) => ({
+      document: store.getRepositorySource(service.context(), request.params.id, request.query),
+    }),
   );
   app.post(
     '/v1/ask',

@@ -3,6 +3,8 @@ import { Command } from 'commander';
 import { basename, join, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import type { EventAck, LocalContext, RecallAnswer, Repository, Session } from '@memvora/contracts';
+import { IdSchema } from '@memvora/contracts';
+import { Check } from 'typebox/value';
 import {
   apiRequest,
   findBindingDirectory,
@@ -269,13 +271,20 @@ program
   .command('ask')
   .description('Retrieve earlier engineering evidence with citations.')
   .argument('<question...>')
-  .action(async (question: string[]) => {
-    const root = findBindingDirectory();
+  .option(
+    '--repository <id>',
+    'Narrow recall to an authorized repository ID instead of the current binding.',
+  )
+  .action(async (question: string[], options: { repository?: string }) => {
+    if (options.repository && !Check(IdSchema, options.repository))
+      throw new Error('Provide a valid repository UUID.');
+    const root = options.repository ? undefined : findBindingDirectory();
     const binding = root ? readBinding(root) : undefined;
     const { origin, token } = connection(binding);
+    const repositoryId = options.repository ?? binding?.repositoryId;
     const answer = await apiRequest<RecallAnswer>(origin, token, '/v1/ask', {
       query: question.join(' '),
-      ...(binding ? { repositoryIds: [binding.repositoryId] } : {}),
+      ...(repositoryId ? { repositoryIds: [repositoryId] } : {}),
     });
     console.log(`${answer.label}\n\n${answer.answer}`);
     for (const [index, step] of answer.steps.entries())

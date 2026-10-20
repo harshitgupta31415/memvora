@@ -31,8 +31,10 @@ export const RepositoryContextSchema = object({
   defaultBranch: Type.String({ maxLength: 200 }),
   commitSha: NullableStringSchema,
   importedAt: TimestampSchema,
+  partial: Type.Optional(Type.Boolean()),
   files: Type.Array(
     object({
+      sourceId: Type.Optional(IdSchema),
       path: Type.String({ maxLength: 1024 }),
       sha: Type.String({ maxLength: 100 }),
       size: Type.Integer({ minimum: 0 }),
@@ -195,6 +197,61 @@ export const CitationSchema = object({
   locator: Type.String(),
 });
 export type Citation = Type.Static<typeof CitationSchema>;
+export const RepositorySourceMetadataSchema = object({
+  id: IdSchema,
+  repositoryId: IdSchema,
+  fullName: Type.String({ maxLength: 300 }),
+  path: Type.String({ maxLength: 1024 }),
+  commitSha: NullableStringSchema,
+  blobSha: Type.String({ maxLength: 100 }),
+  contentHash: Type.String({ pattern: '^[a-f0-9]{64}$' }),
+  importedAt: TimestampSchema,
+  lineCount: Type.Integer({ minimum: 1 }),
+  isCurrent: Type.Boolean(),
+});
+export type RepositorySourceMetadata = Type.Static<typeof RepositorySourceMetadataSchema>;
+export const RepositorySourceRangeQuerySchema = object({
+  startLine: Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+});
+export type RepositorySourceRangeQuery = Type.Static<typeof RepositorySourceRangeQuerySchema>;
+export const RepositorySourceMatchSchema = object({
+  source: RepositorySourceMetadataSchema,
+  startLine: Type.Integer({ minimum: 1 }),
+  endLine: Type.Integer({ minimum: 1 }),
+  excerpt: Type.String({ maxLength: 16000 }),
+  excerptTruncated: Type.Boolean(),
+});
+export type RepositorySourceMatch = Type.Static<typeof RepositorySourceMatchSchema>;
+export const RepositorySourceDetailSchema = object({
+  ...RepositorySourceMatchSchema.properties,
+  hasBefore: Type.Boolean(),
+  hasAfter: Type.Boolean(),
+});
+export type RepositorySourceDetail = Type.Static<typeof RepositorySourceDetailSchema>;
+export const RepositorySourceResponseSchema = object({ document: RepositorySourceDetailSchema });
+export const RepositorySourceSearchResponseSchema = object({
+  items: Type.Array(RepositorySourceMatchSchema, { maxItems: 20 }),
+  requestId: Type.String(),
+});
+export type RepositorySourceSearchResponse = Type.Static<
+  typeof RepositorySourceSearchResponseSchema
+>;
+export const RepositoryFileCitationSchema = object({
+  id: IdSchema,
+  kind: Type.Literal('repository_file'),
+  repositoryId: IdSchema,
+  locator: Type.String(),
+  fullName: Type.String({ maxLength: 300 }),
+  path: Type.String({ maxLength: 1024 }),
+  commitSha: NullableStringSchema,
+  contentHash: Type.String({ pattern: '^[a-f0-9]{64}$' }),
+  startLine: Type.Integer({ minimum: 1 }),
+  endLine: Type.Integer({ minimum: 1 }),
+});
+export type RepositoryFileCitation = Type.Static<typeof RepositoryFileCitationSchema>;
+export const RecallCitationSchema = Type.Union([CitationSchema, RepositoryFileCitationSchema]);
+export type RecallCitation = Type.Static<typeof RecallCitationSchema>;
 export const MemorySchema = object({
   id: IdSchema,
   repositoryId: IdSchema,
@@ -244,7 +301,7 @@ export const RecallAnswerSchema = object({
   label: Type.String(),
   answer: Type.String(),
   steps: Type.Array(object({ text: Type.String(), sourceIds: Type.Array(IdSchema) })),
-  sources: Type.Array(CitationSchema),
+  sources: Type.Array(RecallCitationSchema),
   uncertainty: Type.Array(Type.String()),
   requestId: Type.String(),
 });

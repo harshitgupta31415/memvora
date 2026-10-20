@@ -1,24 +1,33 @@
 'use client';
 
-import Link from 'next/link';
 import { useRef, useState } from 'react';
 import { RecallAnswerSchema, type RecallAnswer, type Repository } from '@memvora/contracts';
 import { submitJson } from '@/lib/client-api';
 import { Icon } from './icon';
-import { SourceLinks } from './evidence';
+import { SourceLinks, SourceList } from './evidence';
 
 const prompts = [
   'What failed in my last investigation?',
   'Which commands passed after the earlier failure?',
   'Where did I stop, and what is still unresolved?',
+  'Where is repository access checked in the imported code?',
 ];
 
-export function AskForm({ repositories }: { repositories: Repository[] }) {
-  const [query, setQuery] = useState('');
-  const [repositoryId, setRepositoryId] = useState('');
+export function AskForm({
+  repositories,
+  initialRepositoryId = '',
+  initialQuery = '',
+}: {
+  repositories: Repository[];
+  initialRepositoryId?: string;
+  initialQuery?: string;
+}) {
+  const [query, setQuery] = useState(initialQuery);
+  const [repositoryId, setRepositoryId] = useState(initialRepositoryId);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [answer, setAnswer] = useState<RecallAnswer | null>(null);
+  const [submittedContext, setSubmittedContext] = useState({ question: '', scope: '' });
   const input = useRef<HTMLTextAreaElement>(null);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -26,6 +35,13 @@ export function AskForm({ repositories }: { repositories: Repository[] }) {
     setPending(true);
     setError('');
     setAnswer(null);
+    setSubmittedContext({
+      question: query.trim(),
+      scope: repositoryId
+        ? (repositories.find((repository) => repository.id === repositoryId)?.name ??
+          'Selected repository')
+        : 'All local repositories',
+    });
     try {
       setAnswer(
         await submitJson(
@@ -62,6 +78,7 @@ export function AskForm({ repositories }: { repositories: Repository[] }) {
           required
           maxLength={2000}
           value={query}
+          disabled={pending}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="What would you like to remember about your work?"
         />
@@ -70,6 +87,7 @@ export function AskForm({ repositories }: { repositories: Repository[] }) {
             aria-label="Repository scope for recall"
             className="select"
             value={repositoryId}
+            disabled={pending}
             onChange={(event) => setRepositoryId(event.target.value)}
           >
             <option value="">All local repositories</option>
@@ -98,7 +116,7 @@ export function AskForm({ repositories }: { repositories: Repository[] }) {
         <div className="panel answer-panel" role="status">
           <div className="skeleton skeleton-subheading" />
           <p className="small text-muted">
-            Searching recorded investigations and linking original sources…
+            Searching recorded work and current imported code, then linking stored sources…
           </p>
         </div>
       )}
@@ -110,6 +128,10 @@ export function AskForm({ repositories }: { repositories: Repository[] }) {
             </h2>
             <span className="memory-label">{answer.label}</span>
           </div>
+          <p className="answer-context">
+            <strong>{submittedContext.scope}</strong>
+            <span>{submittedContext.question}</span>
+          </p>
           <p className="answer-body">{answer.answer}</p>
           {answer.steps.length > 0 && (
             <ol className="answer-steps">
@@ -117,7 +139,7 @@ export function AskForm({ repositories }: { repositories: Repository[] }) {
                 <li key={index}>
                   <div>
                     {step.text}
-                    <SourceLinks ids={step.sourceIds} />
+                    <SourceLinks ids={step.sourceIds} sources={answer.sources} />
                   </div>
                 </li>
               ))}
@@ -126,22 +148,7 @@ export function AskForm({ repositories }: { repositories: Repository[] }) {
           {answer.sources.length > 0 && (
             <>
               <h3 className="subheading">Original sources</h3>
-              <div className="source-list">
-                {answer.sources.map((source, index) => (
-                  <Link
-                    href={`/events/${encodeURIComponent(source.id)}`}
-                    key={source.id}
-                    className="source-item"
-                  >
-                    <Icon name="terminal" size={15} />
-                    <span>
-                      Command evidence {index + 1}{' '}
-                      <span className="mono">· {source.id.slice(0, 8)}</span>
-                    </span>
-                    <Icon name="arrow" size={12} />
-                  </Link>
-                ))}
-              </div>
+              <SourceList sources={answer.sources} />
             </>
           )}
           {answer.uncertainty.length > 0 && (
@@ -166,8 +173,8 @@ export function AskForm({ repositories }: { repositories: Repository[] }) {
             </span>
             <h2>Earlier work is useful context.</h2>
             <p>
-              Ask about the errors, attempts, and checks you have captured. Answers link back to the
-              evidence they use.
+              Ask about captured investigations or the current imported code snapshot. Answers link
+              back to the stored evidence they use.
             </p>
             <div className="suggested-prompts">
               {prompts.map((prompt) => (

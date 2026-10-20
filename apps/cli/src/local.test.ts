@@ -1,10 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import { recoverIncomplete } from './capture.js';
-import { ensurePrivateDirectory, LocalOutbox, writeBinding } from './local.js';
+import {
+  ensurePrivateDirectory,
+  findBindingDirectory,
+  LocalOutbox,
+  readBinding,
+  writeBinding,
+} from './local.js';
 
 function removeFixtureDirectory(directory: string): void {
   const target = resolve(directory);
@@ -14,6 +20,32 @@ function removeFixtureDirectory(directory: string): void {
 }
 
 describe('local outbox acknowledgement', () => {
+  it('stops at the current Git boundary and keeps a corrupt local binding visible', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'memvora-binding-boundary-'));
+    const project = join(directory, 'project');
+    const nested = join(project, 'src');
+    try {
+      mkdirSync(nested, { recursive: true });
+      mkdirSync(join(directory, '.memvora'));
+      writeFileSync(
+        join(directory, '.memvora', 'config.json'),
+        JSON.stringify({ legacySettings: true }),
+      );
+      writeFileSync(join(project, '.git'), 'gitdir: fixture-only\n');
+      expect(findBindingDirectory(nested)).toBeUndefined();
+      writeBinding(project, {
+        schemaVersion: 1,
+        repositoryId: '11111111-1111-4111-8111-111111111111',
+        apiUrl: 'http://127.0.0.1:4000',
+      });
+      expect(findBindingDirectory(nested)).toBe(project);
+      writeFileSync(join(project, '.memvora', 'config.json'), '{}');
+      expect(findBindingDirectory(nested)).toBe(project);
+      expect(() => readBinding(project)).toThrow('Invalid local binding');
+    } finally {
+      removeFixtureDirectory(directory);
+    }
+  });
   it('preserves repeated executions and leaves an event arriving during upload pending', () => {
     const outbox = new LocalOutbox(':memory:');
     try {

@@ -4,6 +4,23 @@ This document retains the original **hosted-target contract plan**. It is not th
 
 The local code now includes SQLite-backed evidence intake, repository/session routes, observed memories, cited ask, a real command wrapper and three MCP retrieval tools. It uses a trusted-machine loopback credential, not the hosted login/pairing system described below. GitHub browsing/import uses an explicit local `gh` bridge; AI is optional and disabled by default. Integration and acceptance results remain separately recorded. Shared runtime validation continues through `packages/contracts`.
 
+## Implemented local imported-code retrieval
+
+These routes use the same authenticated local workspace/repository scope as execution evidence. They index imported redacted files, not arbitrary filesystem paths, and do not require a provider credential or hosted OAuth setup.
+
+| Route                                | Input                                                                                          | Response and behavior                                                                                                                                                                                         |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/repository-sources/search` | Strict `SearchRequest`: `query`, optional `repositoryIds`, optional `limit` (1–20)             | `{items: RepositorySourceMatch[], requestId}`. Lexical search over the latest captured import. Explicit inaccessible repositories deny; an empty repository list returns no hits.                             |
+| `GET /v1/repository-sources/:id`     | Immutable UUID source ID; optional `startLine` (default 1), `limit` (default 100, maximum 200) | `{document: RepositorySourceDetail}`. Bounded redacted text with `startLine`, `endLine`, `excerptTruncated`, `hasBefore` and `hasAfter`. Historical versions resolve while their parent scope remains active. |
+
+A match contains `source` metadata and a bounded excerpt. Metadata includes `id`, `repositoryId`, `fullName`, `path`, nullable `commitSha`, `blobSha`, SHA-256 `contentHash`, first-observed `importedAt`, `lineCount` and `isCurrent`. Line indices refer to the stored redacted snapshot; they are not promised original GitHub line positions. Unknown commits remain `null`. Source IDs resolve stored bytes, never mutable branch/path lookups or local file reads. `excerptTruncated` means a byte/character cap cut the selected range; `hasBefore` and `hasAfter` describe ordinary line pagination.
+
+`POST /v1/ask` returns a discriminated `RecallCitation` union. Execution citations retain `kind: "event"`. Imported-code citations use `kind: "repository_file"` with source UUID, repository, API locator, full name/path, nullable commit, content hash and line range. Answer steps reference those source IDs. The website maps a file citation to `/sources/:id?startLine=N&limit=100`; its API locator points to `/v1/repository-sources/:id` with the bounded range.
+
+Ask preserves the existing command-neighbor budget and adds at most five matching file excerpts, clipped to a 4,000-character per-excerpt budget with adjusted range metadata. Session-selected questions restrict code to the session's repository, intersected with explicit repository filters. Recognized recent-investigation questions remain command-only. Code content is captured context, not evidence that an earlier execution succeeded or that a fix was verified. Retrieval does not widen optional per-event AI enrichment inputs.
+
+Reimport updates the current snapshot atomically but retains immutable source versions for older citations. A partial import's missing paths are not evidence of deletion from GitHub. Retained per-repository history is admitted up to 32 MiB of stored text and 2,000 versions; exceeding the cap rejects the save instead of silently evicting sources. Repository/workspace deletion blocks both current/historical reads, removes file search entries and fences stale saves. These are local SQLite guarantees to verify separately from the hosted target below.
+
 ## Implemented local job controls
 
 These routes are implemented for the local SQLite mode and require the same loopback Host/Origin checks and local bearer credential as evidence routes. They do not implement hosted account authorization.

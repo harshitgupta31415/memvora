@@ -33,7 +33,8 @@
     "mcp": "npm run start --workspace=@memvora/mcp",
     "worker:check": "npm run check-config --workspace=@memvora/worker",
     "doctor": "node scripts/doctor.mjs",
-    "acceptance:local": "node scripts/acceptance-local.mjs"
+    "acceptance:local": "node scripts/acceptance-local.mjs",
+    "acceptance:sources": "node scripts/acceptance-sources.mjs"
   },
   "devDependencies": {
     "@types/node": "^24",

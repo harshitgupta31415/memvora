@@ -41,6 +41,8 @@ export function findBindingDirectory(cwd = process.cwd()): string | undefined {
   let location = resolve(cwd);
   while (true) {
     if (existsSync(join(location, '.memvora', 'config.json'))) return location;
+    // A repository without a binding must not inherit an unrelated ancestor's settings.
+    if (existsSync(join(location, '.git'))) return undefined;
     const parent = dirname(location);
     if (parent === location) return undefined;
     location = parent;

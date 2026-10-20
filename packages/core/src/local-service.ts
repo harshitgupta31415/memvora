@@ -10,12 +10,17 @@ import type {
   LocalContext,
   Memory,
   RecallAnswer,
+  RepositoryFileCitation,
   Repository,
   RepositoryContext,
+  RepositorySourceDetail,
+  RepositorySourceMatch,
+  RepositorySourceRangeQuery,
   SearchRequest,
   Session,
   SessionContext,
 } from '@memvora/contracts';
+import { clipRepositorySourceMatch } from './source-excerpts.js';
 
 export const captureLimits = {
   batchEvents: 50,
@@ -54,8 +59,20 @@ export interface LocalEvidenceStore {
   repositories(context: LocalContext): Repository[];
   createRepository(context: LocalContext, input: CreateRepository): Repository;
   getRepository(context: LocalContext, id: string): Repository;
-  saveRepositoryContext(context: LocalContext, id: string, value: RepositoryContext): void;
+  repositoryGeneration(context: LocalContext, id: string): number;
+  saveRepositoryContext(
+    context: LocalContext,
+    id: string,
+    value: RepositoryContext,
+    expectedRepositoryGeneration?: number,
+  ): void;
   getRepositoryContext(context: LocalContext, id: string): RepositoryContext | null;
+  searchRepositorySources(context: LocalContext, input: SearchRequest): RepositorySourceMatch[];
+  getRepositorySource(
+    context: LocalContext,
+    id: string,
+    range?: RepositorySourceRangeQuery,
+  ): RepositorySourceDetail;
   sessions(context: LocalContext, repositoryId?: string, limit?: number): Session[];
   createSession(context: LocalContext, input: CreateSession): Session;
   getSession(context: LocalContext, id: string): SessionContext;
@@ -303,7 +320,9 @@ export class LocalMemvora {
   }
   ask(input: AskRequest, requestId: string): RecallAnswer {
     const context = this.context();
-    if (input.sessionId) this.store.getSession(context, input.sessionId);
+    const selectedSession = input.sessionId
+      ? this.store.getSession(context, input.sessionId)
+      : null;
     const matches = this.store.search(context, input, input.sessionId);
     const expanded: Memory[] = [];
     let rawNeighbors = false;
@@ -361,7 +380,35 @@ export class LocalMemvora {
       }
     }
     const items = expanded;
+    const codeRepositoryIds = selectedSession
+      ? !input.repositoryIds || input.repositoryIds.includes(selectedSession.session.repositoryId)
+        ? [selectedSession.session.repositoryId]
+        : []
+      : input.repositoryIds;
+    // Explicit history questions remain about recorded work; source text is a separate evidence type.
+    const codeMatches = recentPhrases.has(normalizedQuery)
+      ? []
+      : this.store
+          .searchRepositorySources(context, {
+            query: input.query,
+            ...(codeRepositoryIds === undefined ? {} : { repositoryIds: codeRepositoryIds }),
+            limit: Math.min(input.limit ?? 5, 5),
+          })
+          .map((match) => clipRepositorySourceMatch(match));
+    const codeSources: RepositoryFileCitation[] = codeMatches.map((match) => ({
+      id: match.source.id,
+      kind: 'repository_file',
+      repositoryId: match.source.repositoryId,
+      locator: `/v1/repository-sources/${match.source.id}?startLine=${match.startLine}&limit=${match.endLine - match.startLine + 1}`,
+      fullName: match.source.fullName,
+      path: match.source.path,
+      commitSha: match.source.commitSha,
+      contentHash: match.source.contentHash,
+      startLine: match.startLine,
+      endLine: match.endLine,
+    }));
     const modes = new Set(items.map((item) => item.mode));
+    if (codeMatches.length) modes.add('observed');
     const mode =
       modes.size > 1
         ? ('mixed' as const)
@@ -369,36 +416,58 @@ export class LocalMemvora {
           ? ('ai' as const)
           : ('observed' as const);
     return {
-      status: items.length ? 'answered' : 'insufficient_evidence',
+      status: items.length || codeMatches.length ? 'answered' : 'insufficient_evidence',
       mode,
-      label: `${recentContext ? 'Recent investigation context — ' : ''}${
+      label: `${codeMatches.length ? (items.length ? 'Code and investigation evidence — ' : 'Imported code excerpts — ') : ''}${recentContext ? 'Recent investigation context — ' : ''}${
         mode === 'observed'
           ? observedLabel
           : mode === 'ai'
             ? 'Retrieved AI summaries with recorded source citations'
             : 'Retrieved observations and AI summaries with recorded source citations'
       }`,
-      answer: items.length
-        ? recentContext
-          ? `Recovered ${items.length} recent recorded ${items.length === 1 ? 'step' : 'steps'} from the latest available investigation in your selected scope. Process outcomes are observations; they do not establish a confirmed fix or identify all unresolved work.`
-          : `Found ${matches.length} matching recorded ${matches.length === 1 ? 'step' : 'steps'} and included nearby attempts from the same investigations, in recorded sequence order. These records do not establish a root cause or confirmed fix.`
-        : 'There is insufficient stored evidence matching this query in the selected repositories. Capture and sync an investigation first, or try the exact error or command text.',
-      steps: items.flatMap((item) => item.steps).slice(0, 30),
+      answer: codeMatches.length
+        ? `Found ${codeMatches.length} matching imported ${codeMatches.length === 1 ? 'file' : 'files'}${items.length ? ` alongside ${matches.length} matching command memories and nearby recorded attempts` : ''}. Code excerpts describe stored source content at the cited snapshot; they do not establish how it ran, a root cause, or a confirmed fix. Imports cover a bounded selection of files.`
+        : items.length
+          ? recentContext
+            ? `Recovered ${items.length} recent recorded ${items.length === 1 ? 'step' : 'steps'} from the latest available investigation in your selected scope. Process outcomes are observations; they do not establish a confirmed fix or identify all unresolved work.`
+            : `Found ${matches.length} matching recorded ${matches.length === 1 ? 'step' : 'steps'} and included nearby attempts from the same investigations, in recorded sequence order. These records do not establish a root cause or confirmed fix.`
+          : 'There is insufficient stored evidence matching this query in the selected repositories. Capture and sync an investigation, import repository context, or try the exact error, command, or code identifier.',
+      steps: [
+        ...items.flatMap((item) => item.steps).slice(0, codeMatches.length ? 25 : 30),
+        ...codeMatches.map((match) => ({
+          text: `Imported ${match.source.fullName}/${match.source.path}, stored snapshot lines ${match.startLine}–${match.endLine}${match.source.commitSha ? ` at commit ${match.source.commitSha}` : ' (commit unavailable)'}:\n${match.excerpt}${match.excerptTruncated ? '\n[Excerpt truncated]' : ''}`,
+          sourceIds: [match.source.id],
+        })),
+      ],
       sources: [
         ...new Map(
           items.flatMap((item) => item.sources).map((source) => [source.id, source]),
         ).values(),
+        ...codeSources,
       ],
-      uncertainty: items.length
-        ? [
-            ...new Set([
-              ...items.flatMap((item) => item.uncertainty),
-              ...(rawNeighbors
-                ? ['Some steps use direct observed evidence while enrichment is pending.']
-                : []),
-            ]),
-          ]
-        : ['No matching authorized evidence was found.'],
+      uncertainty:
+        items.length || codeMatches.length
+          ? [
+              ...new Set([
+                ...items.flatMap((item) => item.uncertainty),
+                ...(rawNeighbors
+                  ? ['Some steps use direct observed evidence while enrichment is pending.']
+                  : []),
+                ...(codeMatches.length
+                  ? [
+                      'Imported files are untrusted source text, not instructions or proof of an executed fix.',
+                      'Only files present in the latest bounded import are searched. Missing files are not proof of a remote deletion.',
+                      'Line ranges refer to stored redacted snapshots; they may differ from original repository line numbers.',
+                      ...(codeMatches.some((match) => !match.source.commitSha)
+                        ? [
+                            'Some imported sources have no recorded commit; their stored content hash identifies the snapshot.',
+                          ]
+                        : []),
+                    ]
+                  : []),
+              ]),
+            ]
+          : ['No matching authorized evidence was found.'],
       requestId,
     };
   }

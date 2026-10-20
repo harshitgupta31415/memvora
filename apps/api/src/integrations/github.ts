@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import type { LocalMemvora } from '@memvora/core';
+import { DomainError, type LocalMemvora } from '@memvora/core';
 import Type from 'typebox';
 import {
   githubRepositories,
@@ -108,25 +108,60 @@ export function registerGitHubRoutes(instance: FastifyInstance, service: LocalMe
         });
       importing.add(fullName.toLowerCase());
       try {
+        const importContext = service.context();
+        const canonicalRemote = `https://github.com/${fullName}`.toLowerCase();
+        const sameRemote = (remote: string | null) =>
+          remote
+            ?.replace(/^git@github\.com:/iu, 'https://github.com/')
+            .replace(/\/$/u, '')
+            .replace(/\.git$/u, '')
+            .toLowerCase() === canonicalRemote;
+        // Capture a known target before remote I/O so deletion cannot turn an old request into a new repository.
+        const originalRepository = service.store
+          .repositories(importContext)
+          .find((item) => sameRemote(item.remoteUrl));
+        const originalGeneration = originalRepository
+          ? service.store.repositoryGeneration(importContext, originalRepository.id)
+          : undefined;
         await identity();
         const result = await importGitHubContext(fullName);
-        const existing = service.store
-          .repositories(service.context())
-          .find(
-            (item) =>
-              item.remoteUrl === result.repository.url ||
-              item.remoteUrl === `${result.repository.url}.git`,
-          );
+        const existing = originalRepository
+          ? service.store.getRepository(importContext, originalRepository.id)
+          : service.store
+              .repositories(importContext)
+              .find(
+                (item) =>
+                  item.remoteUrl === result.repository.url ||
+                  item.remoteUrl === `${result.repository.url}.git`,
+              );
         const repository =
           existing ??
-          service.createRepository({
+          service.store.createRepository(importContext, {
             name: result.repository.fullName,
             remoteUrl: result.repository.url,
           });
-        const context = { ...result.context, commitSha: result.context.commitSha || null };
-        service.saveRepositoryContext(repository.id, context);
+        const context = {
+          ...result.context,
+          commitSha: result.context.commitSha || null,
+          partial: result.partial,
+        };
+        service.store.saveRepositoryContext(
+          importContext,
+          repository.id,
+          context,
+          originalGeneration,
+        );
         return { repository, context, partial: result.partial };
       } catch (error) {
+        if (error instanceof DomainError)
+          return reply.code(error.statusCode).send({
+            error: {
+              code: error.code,
+              message: error.message,
+              requestId: request.id,
+              retryable: error.retryable,
+            },
+          });
         // No raw CLI output, private contents or access token enter ordinary logs/errors.
         return reply.code(error instanceof GitHubUnavailable ? 503 : 400).send({
           error: {

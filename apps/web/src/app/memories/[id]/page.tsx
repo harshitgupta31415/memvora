@@ -4,7 +4,7 @@ import { MemoryResponseSchema } from '@memvora/contracts';
 import { apiRequest } from '@/lib/api';
 import { Icon } from '@/components/icon';
 import { DateLabel, ErrorState, PageHeading, SectionHeading, StatusBadge } from '@/components/ui';
-import { SourceLinks } from '@/components/evidence';
+import { SourceLinks, SourceList } from '@/components/evidence';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +37,7 @@ export default async function MemoryDetail({ params }: { params: Promise<{ id: s
               <li key={index}>
                 <div>
                   {step.text}
-                  <SourceLinks ids={step.sourceIds} />
+                  <SourceLinks ids={step.sourceIds} sources={memory.sources} />
                 </div>
               </li>
             ))}
@@ -58,23 +58,7 @@ export default async function MemoryDetail({ params }: { params: Promise<{ id: s
             title="Original sources"
             description={`${memory.sources.length} linked execution event${memory.sources.length === 1 ? '' : 's'}`}
           />
-          <div className="source-list">
-            {memory.sources.map((source, index) => (
-              <Link
-                key={source.id}
-                className="source-item"
-                href={`/events/${encodeURIComponent(source.id)}`}
-              >
-                <Icon name="terminal" size={15} />
-                <span>
-                  Command evidence {index + 1}
-                  <br />
-                  <span className="muted-caption mono">{source.id.slice(0, 8)}</span>
-                </span>
-                <Icon name="arrow" size={12} />
-              </Link>
-            ))}
-          </div>
+          <SourceList sources={memory.sources} />
           <p className="muted-caption">
             Created <DateLabel value={memory.createdAt} />
             <br />

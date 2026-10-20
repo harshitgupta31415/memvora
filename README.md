@@ -4,7 +4,7 @@ Engineering memory that preserves recorded investigations and returns their supp
 
 Owner: **harshitgupta31415**. Team: Harshit Gupta (Leader), Himanshu Mittal, Gaurav Basnal, Yash Lalwani.
 
-This repository contains a **local MVP implementation**: a Next.js website, a loopback Fastify API, SQLite evidence storage, a Windows-first command wrapper, background memory processing and read-only MCP retrieval. It starts empty. Recall and enrichment use captured execution evidence; imported GitHub snapshots currently support source inspection. Feeding those snapshots into retrieval and enrichment remains planned. The hosted PostgreSQL architecture in the original PRD remains the longer-term target, with separate acceptance requirements.
+This repository contains a **local MVP implementation**: a Next.js website, a loopback Fastify API, SQLite evidence storage, a Windows-first command wrapper, background memory processing and read-only MCP retrieval. It starts empty. Recall combines captured investigations with the latest imported code snapshot, with source IDs and stored file ranges. Per-event enrichment remains grounded in execution evidence. The hosted PostgreSQL architecture in the original PRD remains the longer-term target, with separate acceptance requirements.
 
 Implementation status and verification are distinct. Do not infer that every PRD requirement, external provider or Windows command has passed acceptance because its code exists. The current checks and remaining gaps are tracked separately from the product plan.
 
@@ -65,6 +65,8 @@ The smoke command deliberately exits unsuccessfully. It is a test input, not a c
 - [AI-assisted development workflow](docs/AI_WORKFLOW.md)
 
 The original architecture calls for PostgreSQL, Drizzle, pgvector and pg-boss. Current local persistence and local jobs use SQLite; the draft PostgreSQL definitions are not applied migrations. Production browser sessions, GitHub App callback/webhook flows, device pairing, OS credential-store support, multiuser/company ownership, vector retrieval and PTY capture remain separate work.
+
+Imported-code citations identify immutable redacted file text, path, available commit and stored-snapshot line range. A partial import is not the whole codebase; an unknown commit stays unknown. Current search uses the latest captured snapshot while older citations retain earlier content until parent deletion. Code evidence does not itself demonstrate a historical fix. See [the GitHub guide](docs/GITHUB_SETUP.md) for coverage and retained-history limits.
 
 ## Useful commands
 

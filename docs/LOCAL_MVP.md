@@ -15,7 +15,7 @@ Read-only MCP adapter ---+                    |
 
 The web server, CLI and MCP share runtime response contracts and the same local API. They do not open the server evidence database directly. The CLI has its own SQLite outbox for offline durability. The API ordinarily runs the local background processor, one job at a time; a separate worker executable is also present. There is no need to start it for the default development flow.
 
-Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. The optional provider path is separate and remains disabled unless explicitly configured.
+Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. Lexical recall also searches the latest imported redacted code snapshot and returns immutable file citations. The optional provider path is separate and remains disabled unless explicitly configured.
 
 ## 2. Start development
 
@@ -97,7 +97,7 @@ node $memvoraCli session end
 node $memvoraCli ask "What did I try for the earlier failing check?"
 ```
 
-Choose a question containing actual recorded error text or distinctive command context. Open the returned event sources in the website. If no matching evidence exists, recall should report insufficient evidence. The observed mode is not a semantic/vector search engine or a guarantee that any reworded question matches.
+Choose a question containing actual recorded error text or distinctive command context. If code was imported, identifiers, filenames or distinctive code phrases can also match file evidence. Open returned event or file sources in the website. If no matching evidence exists, recall should report insufficient evidence. The observed mode is not a semantic/vector search engine or a guarantee that any reworded question matches. Imported code shows what was captured; it does not establish that a command ran or that an issue was fixed.
 
 ### File-based command inputs
 
@@ -153,13 +153,23 @@ The first-run workspace is empty. Counts and memories reflect stored data, not s
 
 Deletion actions currently use the guarded local API; the settings screen has no deletion controls.
 
+Imported-file detail opens at `/sources/[id]?startLine=N&limit=100`, showing immutable provenance and bounded stored-snapshot lines.
+
 ## 7. Optional GitHub context
 
 Use your existing `gh auth login` identity. The repository page can browse accessible repositories and explicitly import a bounded snapshot: up to 20 supported small text files, 256 KiB total, recent issue/PR metadata and commit provenance. Large repositories are intentionally partial. Import does not run repository code.
 
 This manual local bridge is not continuous GitHub App synchronization or production installation authorization. A private App manifest is drafted, but callback, installation and webhook flows require their own implementation/owner setup. See [GITHUB_SETUP.md](GITHUB_SETUP.md). Do not paste a GitHub token into the website.
 
-Imported source files and metadata can be inspected in repository detail. Ask searches captured-event memories, and enrichment receives execution evidence. Indexing imported files and supplying their context to recall/enrichment remains planned.
+### Search and cite imported code
+
+Ask combines matching command investigations with up to five imported-file matches. File evidence retains its source ID, repository/path, available commit SHA, content hash and bounded line range. Source-specific search also returns file matches without pretending they are execution memories. Session-filtered asks narrow file evidence to that session's repository. Explicit recent-investigation questions use command history, even if imported text contains those words. Optional per-event AI enrichment still receives execution evidence; imported code is retrieved directly in this slice.
+
+Search considers only the latest captured import for each allowed repository. Reimporting creates or selects immutable file versions and changes the current set atomically. An old citation still opens its original redacted text while its parent remains active; `isCurrent: false` identifies historical evidence. A source with unknown commit keeps `commitSha: null`. Source line numbers describe the stored redacted snapshot, which can differ from original GitHub lines after redaction.
+
+Files may be omitted because of size, type, exclusions, network limits or bounded selection. A partial snapshot does not prove omitted paths were deleted or that the whole repository was searched. A failed atomic save leaves the previous captured set current. Per-repository retained history is capped at 32 MiB of file text and 2,000 immutable versions; exceeding admission limits rejects the new import and preserves prior citations instead of silently evicting them.
+
+Repository/workspace deletion makes both current and historical sources unavailable and removes search entries. Source reads recheck scope; knowing an old source ID does not grant access. See [API.md](API.md) for source query/range contracts.
 
 ## 8. Optional HTTP AI
 
@@ -196,7 +206,7 @@ For custom configuration, set `MEMVORA_API_URL` and the absolute `MEMVORA_DATA_D
 
 ## 10. Current local routes versus hosted target
 
-The current API implements `/health`, `/v1/system/status`, `/ready`, `/v1/me`, dashboard/settings, repository registration/list/detail, session creation/list/detail/close, event batch/detail, memory search/detail, ask, scoped processing-job lists, failed-job retry and guarded local deletion actions. GitHub integration adds status, paginated repository browsing, explicit import and stored-context detail. Exact schemas are in `packages/contracts/src/local.ts`; route behavior is in `apps/api/src/app.ts` and `apps/api/src/integrations/github.ts`.
+The current API implements `/health`, `/v1/system/status`, `/ready`, `/v1/me`, dashboard/settings, repository registration/list/detail, session creation/list/detail/close, event batch/detail, memory search/detail, imported-source search/ranged detail, ask, scoped processing-job lists, failed-job retry and guarded local deletion actions. GitHub integration adds status, paginated repository browsing, explicit import and stored-context detail. Exact schemas are in `packages/contracts/src/local.ts`; route behavior is in `apps/api/src/app.ts` and `apps/api/src/integrations/github.ts`.
 
 Local protection uses the bearer credential, loopback checks, repository/workspace scope and deletion fences. It is not a substitute for hosted users, organization roles, GitHub App revocation synchronization or remote MCP authorization. Remaining hosted work includes PostgreSQL migration, pg-boss integration, pgvector retrieval, per-device credentials, browser sessions/CSRF design, OS credential storage, company ownership, operational retention and public deployment readiness. Keep those original acceptance gates in the PRD/roadmap.
 

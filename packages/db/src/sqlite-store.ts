@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -13,13 +14,22 @@ import type {
   Memory,
   Repository,
   RepositoryContext,
+  RepositorySourceDetail,
+  RepositorySourceMatch,
+  RepositorySourceMetadata,
+  RepositorySourceRangeQuery,
   SearchRequest,
   Session,
   SessionContext,
 } from '@memvora/contracts';
 import { DomainError, newId, redactText } from '@memvora/core';
 import type { AcceptedEvent, EnrichmentJob, LocalEvidenceStore } from '@memvora/core';
-import { localFtsMigrationSql, localRetryMigrationSql, localSchemaSql } from './sqlite-schema.js';
+import {
+  localFtsMigrationSql,
+  localRepositorySourcesMigrationSql,
+  localRetryMigrationSql,
+  localSchemaSql,
+} from './sqlite-schema.js';
 
 type Row = Record<string, SQLOutputValue>;
 const string = (row: Row, key: string): string => String(row[key]);
@@ -30,6 +40,52 @@ const notFound = () =>
   new DomainError('NOT_FOUND', 'The requested resource is not available in this workspace.', 404);
 const now = () => new Date().toISOString();
 const parse = <T>(value: SQLOutputValue | undefined): T => JSON.parse(String(value)) as T;
+const sourceHistoryLimits = { textBytes: 32 * 1024 * 1024, versions: 2_000 } as const;
+const sourceLines = (text: string): string[] =>
+  text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
+function literalSearchTerms(query: string): string[] {
+  const stop = new Set([
+    'how',
+    'did',
+    'i',
+    'the',
+    'a',
+    'an',
+    'and',
+    'or',
+    'to',
+    'was',
+    'is',
+    'it',
+    'what',
+    'why',
+    'my',
+    'we',
+    'fix',
+    'fixed',
+  ]);
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) throw new DomainError('INVALID_QUERY', 'A search query is required.');
+  const terms = [
+    ...new Set(normalized.split(/\s+/).filter((term) => term && !stop.has(term))),
+  ].slice(0, 12);
+  return terms.length ? terms : [normalized];
+}
+function boundedExcerpt(lines: string[], startLine: number, limit: number) {
+  const selected = lines.slice(startLine - 1, startLine - 1 + limit).join('\n');
+  let excerpt = '';
+  let bytes = 0;
+  for (const character of selected) {
+    const nextBytes = Buffer.byteLength(character, 'utf8');
+    if (bytes + nextBytes > 16_384 || excerpt.length + character.length > 16_000) break;
+    excerpt += character;
+    bytes += nextBytes;
+  }
+  const excerptTruncated = excerpt.length < selected.length;
+  if (excerptTruncated && excerpt.endsWith('\n')) excerpt = excerpt.slice(0, -1);
+  const endLine = startLine + (excerpt.match(/\n/g)?.length ?? 0);
+  return { startLine, endLine, excerpt, excerptTruncated };
+}
 
 /** Synchronous, bounded local adapter. Do not use as a hosted multi-user database. */
 export class SqliteEvidenceStore implements LocalEvidenceStore {
@@ -42,7 +98,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     if (this.path !== ':memory:') mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     this.database = new DatabaseSync(this.path, { timeout: 5_000 });
     const version = this.one('PRAGMA user_version');
-    if (version && integer(version, 'user_version') > 3) {
+    if (version && integer(version, 'user_version') > 4) {
       this.database.close();
       throw new Error('Local database schema is newer than this application.');
     }
@@ -50,12 +106,17 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     this.transaction(() => {
       // Re-read after BEGIN IMMEDIATE: another process may have migrated while this one waited.
       const currentVersion = integer(this.one('PRAGMA user_version') ?? {}, 'user_version');
-      if (currentVersion > 3)
+      if (currentVersion > 4)
         throw new Error('Local database schema is newer than this application.');
       if (currentVersion < 2) {
         this.database.exec(localFtsMigrationSql);
       }
       if (currentVersion < 3) this.database.exec(localRetryMigrationSql);
+      if (currentVersion < 4) {
+        this.database.exec(localRepositorySourcesMigrationSql);
+        this.backfillRepositorySources();
+        this.database.exec('PRAGMA user_version=4');
+      }
     });
     this.transaction(() => {
       if (!this.one('SELECT user_id FROM local_identity WHERE singleton=1')) {
@@ -238,9 +299,22 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   getRepository(context: LocalContext, id: string): Repository {
     return this.repositoryDto(this.repositoryRow(context, id));
   }
-  saveRepositoryContext(context: LocalContext, id: string, value: RepositoryContext): void {
+  repositoryGeneration(context: LocalContext, id: string): number {
+    return integer(this.repositoryRow(context, id), 'generation');
+  }
+  saveRepositoryContext(
+    context: LocalContext,
+    id: string,
+    value: RepositoryContext,
+    expectedRepositoryGeneration?: number,
+  ): void {
     this.transaction(() => {
-      this.repositoryRow(context, id);
+      const repository = this.repositoryRow(context, id);
+      if (
+        expectedRepositoryGeneration !== undefined &&
+        expectedRepositoryGeneration !== integer(repository, 'generation')
+      )
+        throw notFound();
       const json = JSON.stringify(value, (_key, item: unknown) =>
         typeof item === 'string' ? redactText(item) : item,
       );
@@ -250,21 +324,258 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
           'Repository context exceeds the 2 MiB local import limit.',
           413,
         );
+      const redacted = JSON.parse(json) as RepositoryContext;
+      this.replaceRepositorySources(
+        context.workspace.id,
+        context.workspace.generation,
+        repository,
+        redacted,
+      );
       this.run(
         'INSERT INTO local_repository_context(repository_id,context_json,imported_at) VALUES(?,?,?) ON CONFLICT(repository_id) DO UPDATE SET context_json=excluded.context_json,imported_at=excluded.imported_at',
         id,
         json,
         value.importedAt,
       );
+      this.run(
+        'INSERT INTO local_repository_context_scope(repository_id,workspace_generation,repository_generation) VALUES(?,?,?) ON CONFLICT(repository_id) DO UPDATE SET workspace_generation=excluded.workspace_generation,repository_generation=excluded.repository_generation',
+        id,
+        context.workspace.generation,
+        integer(repository, 'generation'),
+      );
     });
   }
   getRepositoryContext(context: LocalContext, id: string): RepositoryContext | null {
     this.repositoryRow(context, id);
     const row = this.one(
-      'SELECT context_json FROM local_repository_context WHERE repository_id=?',
+      "SELECT c.context_json FROM local_repository_context c JOIN local_repository_context_scope q ON q.repository_id=c.repository_id JOIN local_repositories r ON r.id=c.repository_id JOIN local_workspaces w ON w.id=r.workspace_id WHERE c.repository_id=? AND r.workspace_id=? AND r.status='active' AND w.status='active' AND w.owner_user_id=? AND w.generation=? AND q.workspace_generation=w.generation AND q.repository_generation=r.generation",
       id,
+      context.workspace.id,
+      context.user.id,
+      context.workspace.generation,
     );
-    return row ? parse<RepositoryContext>(row['context_json']) : null;
+    if (!row) return null;
+    const value = parse<RepositoryContext>(row['context_json']);
+    const sources = new Map(
+      this.rows(
+        'SELECT h.path,h.source_id FROM local_repository_source_heads h JOIN local_repository_sources s ON s.id=h.source_id JOIN local_repositories r ON r.id=h.repository_id WHERE h.repository_id=? AND s.workspace_id=? AND s.workspace_generation=? AND s.repository_generation=r.generation',
+        id,
+        context.workspace.id,
+        context.workspace.generation,
+      ).map((head) => [string(head, 'path'), string(head, 'source_id')]),
+    );
+    return {
+      ...value,
+      files: value.files.map((file) => {
+        const { sourceId: _ignoredSourceId, ...snapshot } = file;
+        const sourceId = sources.get(file.path);
+        return sourceId ? { ...snapshot, sourceId } : snapshot;
+      }),
+    };
+  }
+  private replaceRepositorySources(
+    workspaceId: string,
+    workspaceGeneration: number,
+    repository: Row,
+    value: RepositoryContext,
+  ): void {
+    if (
+      !Array.isArray(value.files) ||
+      value.files.length > 100 ||
+      new Set(value.files.map((file) => file.path)).size !== value.files.length ||
+      value.files.some(
+        (file) => file.path.length > 1024 || file.sha.length > 100 || file.text.length > 131_072,
+      )
+    )
+      throw new DomainError(
+        'INVALID_REPOSITORY_CONTEXT',
+        'An imported context must contain at most 100 unique, bounded file snapshots.',
+      );
+    const repositoryId = string(repository, 'id');
+    const sources = value.files.map((file) => {
+      const text = redactText(file.text);
+      const contentHash = createHash('sha256').update(text, 'utf8').digest('hex');
+      const commitSha = value.commitSha || null;
+      const existing = this.one(
+        'SELECT id FROM local_repository_sources WHERE repository_id=? AND workspace_generation=? AND repository_generation=? AND full_name=? AND path=? AND commit_key=? AND blob_sha=? AND content_hash=?',
+        repositoryId,
+        workspaceGeneration,
+        integer(repository, 'generation'),
+        value.fullName,
+        file.path,
+        commitSha ?? '',
+        file.sha,
+        contentHash,
+      );
+      return {
+        file,
+        text,
+        contentHash,
+        commitSha,
+        id: existing ? string(existing, 'id') : newId(),
+        isNew: !existing,
+      };
+    });
+    const retained =
+      this.one(
+        'SELECT count(*) AS count,coalesce(sum(length(CAST(text AS BLOB))),0) AS bytes FROM local_repository_sources WHERE repository_id=?',
+        repositoryId,
+      ) ?? {};
+    const additions = sources.filter((source) => source.isNew);
+    if (
+      integer(retained, 'count') + additions.length > sourceHistoryLimits.versions ||
+      integer(retained, 'bytes') +
+        additions.reduce((bytes, source) => bytes + Buffer.byteLength(source.text, 'utf8'), 0) >
+        sourceHistoryLimits.textBytes
+    )
+      throw new DomainError(
+        'SOURCE_HISTORY_LIMIT',
+        'This repository reached its retained source history limit. Delete the repository history explicitly before importing more versions.',
+        413,
+      );
+    for (const source of additions)
+      this.run(
+        'INSERT INTO local_repository_sources(id,workspace_id,repository_id,workspace_generation,repository_generation,full_name,path,commit_sha,commit_key,blob_sha,content_hash,text,line_count,imported_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        source.id,
+        workspaceId,
+        repositoryId,
+        workspaceGeneration,
+        integer(repository, 'generation'),
+        value.fullName,
+        source.file.path,
+        source.commitSha,
+        source.commitSha ?? '',
+        source.file.sha,
+        source.contentHash,
+        source.text,
+        sourceLines(source.text).length,
+        value.importedAt,
+      );
+    this.run('DELETE FROM local_repository_source_heads WHERE repository_id=?', repositoryId);
+    for (const source of sources)
+      this.run(
+        'INSERT INTO local_repository_source_heads(repository_id,path,source_id) VALUES(?,?,?)',
+        repositoryId,
+        source.file.path,
+        source.id,
+      );
+  }
+  private backfillRepositorySources(): void {
+    let afterId = '';
+    while (true) {
+      const row = this.one(
+        "SELECT c.context_json,r.*,w.generation AS workspace_generation FROM local_repository_context c JOIN local_repositories r ON r.id=c.repository_id JOIN local_workspaces w ON w.id=r.workspace_id WHERE r.status='active' AND w.status='active' AND r.id>? ORDER BY r.id LIMIT 1",
+        afterId,
+      );
+      if (!row) break;
+      afterId = string(row, 'id');
+      const json = JSON.stringify(
+        parse<RepositoryContext>(row['context_json']),
+        (_key, item: unknown) => (typeof item === 'string' ? redactText(item) : item),
+      );
+      const value = JSON.parse(json) as RepositoryContext;
+      this.replaceRepositorySources(
+        string(row, 'workspace_id'),
+        integer(row, 'workspace_generation'),
+        row,
+        value,
+      );
+      this.run(
+        'UPDATE local_repository_context SET context_json=? WHERE repository_id=?',
+        json,
+        afterId,
+      );
+      this.run(
+        'INSERT INTO local_repository_context_scope(repository_id,workspace_generation,repository_generation) VALUES(?,?,?) ON CONFLICT(repository_id) DO UPDATE SET workspace_generation=excluded.workspace_generation,repository_generation=excluded.repository_generation',
+        afterId,
+        integer(row, 'workspace_generation'),
+        integer(row, 'generation'),
+      );
+    }
+  }
+  private sourceMetadata(row: Row): RepositorySourceMetadata {
+    return {
+      id: string(row, 'id'),
+      repositoryId: string(row, 'repository_id'),
+      fullName: string(row, 'full_name'),
+      path: string(row, 'path'),
+      commitSha: nullable(row, 'commit_sha'),
+      blobSha: string(row, 'blob_sha'),
+      contentHash: string(row, 'content_hash'),
+      importedAt: string(row, 'imported_at'),
+      lineCount: integer(row, 'line_count'),
+      isCurrent: Boolean(row['is_current']),
+    };
+  }
+  getRepositorySource(
+    context: LocalContext,
+    id: string,
+    range: RepositorySourceRangeQuery = {},
+  ): RepositorySourceDetail {
+    this.requireContext(context);
+    const row = this.one(
+      "SELECT s.*,EXISTS(SELECT 1 FROM local_repository_source_heads h WHERE h.repository_id=s.repository_id AND h.path=s.path AND h.source_id=s.id) AS is_current FROM local_repository_sources s JOIN local_repositories r ON r.id=s.repository_id JOIN local_workspaces w ON w.id=s.workspace_id WHERE s.id=? AND s.workspace_id=? AND r.status='active' AND w.status='active' AND w.owner_user_id=? AND w.generation=? AND s.workspace_generation=w.generation AND s.repository_generation=r.generation",
+      id,
+      context.workspace.id,
+      context.user.id,
+      context.workspace.generation,
+    );
+    if (!row) throw notFound();
+    const startLine = range.startLine ?? 1;
+    const limit = range.limit ?? 100;
+    if (
+      !Number.isInteger(startLine) ||
+      startLine < 1 ||
+      startLine > 1_000_000 ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 200 ||
+      startLine > integer(row, 'line_count')
+    )
+      throw new DomainError(
+        'INVALID_SOURCE_RANGE',
+        'The requested snapshot line range is outside the stored source.',
+        400,
+      );
+    const excerpt = boundedExcerpt(sourceLines(string(row, 'text')), startLine, limit);
+    return {
+      source: this.sourceMetadata(row),
+      ...excerpt,
+      hasBefore: startLine > 1,
+      hasAfter: excerpt.endLine < integer(row, 'line_count'),
+    };
+  }
+  searchRepositorySources(context: LocalContext, input: SearchRequest): RepositorySourceMatch[] {
+    this.requireContext(context);
+    const ids = input.repositoryIds ? [...new Set(input.repositoryIds)] : undefined;
+    if (ids) {
+      for (const id of ids) this.repositoryRow(context, id);
+      if (!ids.length) return [];
+    }
+    const terms = literalSearchTerms(input.query);
+    const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(' OR ');
+    const rows = this.rows(
+      `SELECT s.*,1 AS is_current,bm25(local_repository_source_fts) AS rank FROM local_repository_source_fts JOIN local_repository_source_heads h ON h.source_id=local_repository_source_fts.source_id JOIN local_repository_sources s ON s.id=h.source_id AND s.repository_id=h.repository_id AND s.path=h.path JOIN local_repositories r ON r.id=s.repository_id JOIN local_workspaces w ON w.id=s.workspace_id WHERE local_repository_source_fts MATCH ? AND s.workspace_id=? AND r.status='active' AND w.status='active' AND w.owner_user_id=? AND w.generation=? AND s.workspace_generation=w.generation AND s.repository_generation=r.generation${ids ? ` AND s.repository_id IN (${ids.map(() => '?').join(',')})` : ''} ORDER BY rank ASC,s.imported_at DESC,s.id DESC LIMIT ?`,
+      match,
+      context.workspace.id,
+      context.user.id,
+      context.workspace.generation,
+      ...(ids ?? []),
+      Math.min(Math.max(input.limit ?? 10, 1), 20),
+    );
+    const tokenize = (text: string) =>
+      text
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/\p{M}/gu, '')
+        .match(/[\p{L}\p{N}]+/gu) ?? [];
+    const words = new Set(terms.flatMap(tokenize));
+    return rows.map((row) => {
+      const lines = sourceLines(string(row, 'text'));
+      const found = lines.findIndex((line) => tokenize(line).some((word) => words.has(word)));
+      const startLine = Math.max(found - 3, 0) + 1;
+      return { source: this.sourceMetadata(row), ...boundedExcerpt(lines, startLine, 12) };
+    });
   }
   sessions(context: LocalContext, repositoryId?: string, limit = 50): Session[] {
     this.requireContext(context);
@@ -608,6 +919,11 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
         context.workspace.id,
       );
       this.run('DELETE FROM local_repository_context WHERE repository_id=?', id);
+      this.run(
+        'DELETE FROM local_repository_sources WHERE repository_id=? AND workspace_id=?',
+        id,
+        context.workspace.id,
+      );
     });
   }
   deleteWorkspace(context: LocalContext): void {
@@ -621,6 +937,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
         'DELETE FROM local_repository_context WHERE repository_id IN (SELECT id FROM local_repositories WHERE workspace_id=?)',
         context.workspace.id,
       );
+      this.run('DELETE FROM local_repository_sources WHERE workspace_id=?', context.workspace.id);
       this.run('DELETE FROM local_events WHERE workspace_id=?', context.workspace.id);
       this.run(
         "UPDATE local_sessions SET status='deleted',generation=generation+1 WHERE workspace_id=?",

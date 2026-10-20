@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { Memory, Repository, Session } from '@memvora/contracts';
+import type { Memory, RecallCitation, Repository, Session } from '@memvora/contracts';
 import { Icon } from './icon';
 import { DateLabel, StatusBadge } from './ui';
 
@@ -33,14 +33,81 @@ export function SessionRow({ session, repository }: { session: Session; reposito
   );
 }
 
-export function SourceLinks({ ids }: { ids: string[] }) {
+export function citationHref(source: RecallCitation): string {
+  if (source.kind === 'event') return `/events/${encodeURIComponent(source.id)}`;
+  const limit = Math.max(1, Math.min(200, source.endLine - source.startLine + 1));
+  return `/sources/${encodeURIComponent(source.id)}?${new URLSearchParams({ startLine: String(source.startLine), limit: String(limit) })}`;
+}
+
+export function SourceLinks({ ids, sources }: { ids: string[]; sources?: RecallCitation[] }) {
+  const sourceMap = new Map(sources?.map((source) => [source.id, source]));
   return (
     <div>
-      {ids.map((id, index) => (
-        <Link href={`/events/${encodeURIComponent(id)}`} key={id} className="citation-link">
-          <Icon name="link" size={10} />
-          Source {index + 1}
-          <span className="sr-only"> {id}</span>
+      {ids.map((id, index) => {
+        const source = sourceMap.get(id);
+        if (sources !== undefined && !source)
+          return (
+            <span key={id} className="citation-unavailable">
+              Source {index + 1} unavailable
+            </span>
+          );
+        return (
+          <Link
+            href={source ? citationHref(source) : `/events/${encodeURIComponent(id)}`}
+            key={id}
+            className="citation-link"
+            title={
+              source?.kind === 'repository_file'
+                ? `${source.fullName}/${source.path} · stored snapshot lines ${source.startLine}–${source.endLine}`
+                : 'Open recorded command evidence'
+            }
+          >
+            <Icon name={source?.kind === 'repository_file' ? 'code' : 'link'} size={10} />
+            {source?.kind === 'repository_file'
+              ? `Code ${index + 1} · L${source.startLine}–${source.endLine}`
+              : `Source ${index + 1}`}
+            <span className="sr-only">
+              {' '}
+              {source?.kind === 'repository_file' ? `${source.path}, stored snapshot lines` : id}
+            </span>
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+export function SourceList({ sources }: { sources: RecallCitation[] }) {
+  return (
+    <div className="source-list">
+      {sources.map((source, index) => (
+        <Link
+          href={citationHref(source)}
+          key={`${source.kind}:${source.id}:${source.kind === 'repository_file' ? source.startLine : 0}`}
+          className="source-item"
+        >
+          <Icon name={source.kind === 'repository_file' ? 'code' : 'terminal'} size={15} />
+          <span>
+            {source.kind === 'repository_file' ? (
+              <>
+                <strong className="source-path mono">{source.path}</strong>
+                <span className="source-caption">
+                  {source.fullName} · stored snapshot lines {source.startLine}–{source.endLine}
+                </span>
+                <span className="source-caption mono">
+                  {source.commitSha
+                    ? `Commit ${source.commitSha.slice(0, 12)}`
+                    : 'Commit not recorded'}{' '}
+                  · SHA-256 {source.contentHash.slice(0, 12)}…
+                </span>
+              </>
+            ) : (
+              <>
+                Command evidence {index + 1} <span className="mono">· {source.id.slice(0, 8)}</span>
+              </>
+            )}
+          </span>
+          <Icon name="arrow" size={12} />
         </Link>
       ))}
     </div>
@@ -59,7 +126,7 @@ export function MemoryCard({ memory }: { memory: Memory }) {
       </h3>
       <p className="memory-summary">{memory.summary}</p>
       <StatusBadge status={memory.outcome} />
-      <SourceLinks ids={memory.sources.map((source) => source.id)} />
+      <SourceLinks ids={memory.sources.map((source) => source.id)} sources={memory.sources} />
     </article>
   );
 }

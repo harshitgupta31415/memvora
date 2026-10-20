@@ -110,3 +110,52 @@ export const localRetryMigrationSql = `
 ALTER TABLE local_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count >= 0);
 PRAGMA user_version = 3;
 `;
+
+/** Version 4 immutable imported snapshots, with search membership limited to current heads. */
+export const localRepositorySourcesMigrationSql = `
+CREATE TABLE IF NOT EXISTS local_repository_context_scope (
+  repository_id TEXT PRIMARY KEY REFERENCES local_repository_context(repository_id) ON DELETE CASCADE,
+  workspace_generation INTEGER NOT NULL,
+  repository_generation INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS local_repository_sources (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES local_workspaces(id),
+  repository_id TEXT NOT NULL REFERENCES local_repositories(id) ON DELETE CASCADE,
+  workspace_generation INTEGER NOT NULL,
+  repository_generation INTEGER NOT NULL,
+  full_name TEXT NOT NULL,
+  path TEXT NOT NULL,
+  commit_sha TEXT,
+  commit_key TEXT NOT NULL,
+  blob_sha TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  text TEXT NOT NULL,
+  line_count INTEGER NOT NULL CHECK(line_count >= 1),
+  imported_at TEXT NOT NULL,
+  UNIQUE(repository_id,workspace_generation,repository_generation,full_name,path,commit_key,blob_sha,content_hash)
+) STRICT;
+CREATE INDEX IF NOT EXISTS local_repository_sources_scope ON local_repository_sources(workspace_id,repository_id,id);
+CREATE TABLE IF NOT EXISTS local_repository_source_heads (
+  repository_id TEXT NOT NULL REFERENCES local_repositories(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  source_id TEXT NOT NULL REFERENCES local_repository_sources(id) ON DELETE CASCADE,
+  PRIMARY KEY(repository_id,path)
+) STRICT;
+CREATE VIRTUAL TABLE IF NOT EXISTS local_repository_source_fts USING fts5(source_id UNINDEXED,searchable_text,tokenize='unicode61');
+CREATE TRIGGER IF NOT EXISTS local_repository_source_immutable BEFORE UPDATE ON local_repository_sources BEGIN
+  SELECT RAISE(ABORT,'REPOSITORY_SOURCE_IMMUTABLE');
+END;
+CREATE TRIGGER IF NOT EXISTS local_repository_source_head_insert AFTER INSERT ON local_repository_source_heads BEGIN
+  INSERT INTO local_repository_source_fts(source_id,searchable_text)
+    SELECT id,full_name || char(10) || path || char(10) || text FROM local_repository_sources WHERE id=new.source_id;
+END;
+CREATE TRIGGER IF NOT EXISTS local_repository_source_head_delete AFTER DELETE ON local_repository_source_heads BEGIN
+  DELETE FROM local_repository_source_fts WHERE source_id=old.source_id;
+END;
+CREATE TRIGGER IF NOT EXISTS local_repository_source_head_update AFTER UPDATE OF source_id ON local_repository_source_heads BEGIN
+  DELETE FROM local_repository_source_fts WHERE source_id=old.source_id;
+  INSERT INTO local_repository_source_fts(source_id,searchable_text)
+    SELECT id,full_name || char(10) || path || char(10) || text FROM local_repository_sources WHERE id=new.source_id;
+END;
+`;

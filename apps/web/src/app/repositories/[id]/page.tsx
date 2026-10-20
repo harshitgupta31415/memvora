@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Compile } from 'typebox/compile';
 import {
+  IdSchema,
   RepositoryContextResponseSchema,
-  RepositoryListSchema,
+  RepositoryResponseSchema,
   SessionListSchema,
 } from '@memvora/contracts';
 import { apiRequest } from '@/lib/api';
@@ -15,17 +17,20 @@ export const dynamic = 'force-dynamic';
 
 export default async function RepositoryDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [repositories, context, sessions] = await Promise.all([
-    apiRequest('/v1/repositories', RepositoryListSchema),
+  if (!Compile(IdSchema).Check(id)) notFound();
+  const [repositoryResult, context, sessions] = await Promise.all([
+    apiRequest(`/v1/repositories/${encodeURIComponent(id)}`, RepositoryResponseSchema),
     apiRequest(
       `/v1/repositories/${encodeURIComponent(id)}/context`,
       RepositoryContextResponseSchema,
     ),
-    apiRequest('/v1/sessions', SessionListSchema),
+    apiRequest(`/v1/sessions?repositoryId=${encodeURIComponent(id)}&limit=8`, SessionListSchema),
   ]);
-  if (!repositories.ok) return <ErrorState message={repositories.message} />;
-  const repository = repositories.data.items.find((repo) => repo.id === id);
-  if (!repository) notFound();
+  if (!repositoryResult.ok) {
+    if (repositoryResult.status === 404) notFound();
+    return <ErrorState message={repositoryResult.message} />;
+  }
+  const { repository } = repositoryResult.data;
   const imported = context.ok ? context.data.context : null;
   const investigations = sessions.ok
     ? sessions.data.items.filter((session) => session.repositoryId === id)
@@ -42,7 +47,15 @@ export default async function RepositoryDetail({ params }: { params: Promise<{ i
         description={
           repository.localPath ?? repository.remoteUrl ?? 'A project in your personal workspace.'
         }
-        action={<RefreshButton />}
+        action={
+          <div className="repository-actions">
+            <Link href={`/ask?repositoryId=${repository.id}`} className="button button-primary">
+              <Icon name="spark" size={14} />
+              Ask about this project
+            </Link>
+            <RefreshButton />
+          </div>
+        }
       />
       <div className="two-column">
         <div className="content-stack">
@@ -74,20 +87,46 @@ export default async function RepositoryDetail({ params }: { params: Promise<{ i
             <section className="panel section-padding">
               <SectionHeading
                 title="Retained source files"
-                description={`${imported.files.length} files from a bounded import. Open a path to inspect its stored text.`}
+                description={`${imported.files.length} files from a bounded import. Open a stored version to inspect its source lines and provenance.`}
               />
+              <p className="muted-caption source-import-note">
+                {imported.partial
+                  ? 'This import is marked partial.'
+                  : 'Import coverage is bounded by supported paths, file sizes, and import limits.'}{' '}
+                Line references describe the stored redacted snapshot.
+              </p>
               {imported.files.length ? (
                 <div className="file-list">
-                  {imported.files.map((file) => (
-                    <details key={file.path} className="source-file">
-                      <summary>
-                        <Icon name="code" size={14} />
-                        <span className="mono">{file.path}</span>
+                  {imported.files.map((file) =>
+                    file.sourceId ? (
+                      <Link
+                        key={file.path}
+                        href={`/sources/${file.sourceId}`}
+                        className="repository-source-row"
+                      >
+                        <Icon name="code" size={15} />
+                        <span className="repository-source-copy">
+                          <strong className="mono">{file.path}</strong>
+                          <span>Open stored snapshot lines and provenance</span>
+                        </span>
                         <span className="file-size">{(file.size / 1024).toFixed(1)} KiB</span>
-                      </summary>
-                      <pre className="output-block">{file.text}</pre>
-                    </details>
-                  ))}
+                        <Icon name="arrow" size={12} />
+                      </Link>
+                    ) : (
+                      <details key={file.path} className="source-file">
+                        <summary>
+                          <Icon name="code" size={14} />
+                          <span className="mono">{file.path}</span>
+                          <span className="file-size">{(file.size / 1024).toFixed(1)} KiB</span>
+                        </summary>
+                        <p className="muted-caption source-file-actions">
+                          This file has no retained source link. Reimport the repository to make its
+                          stored version available to citations.
+                        </p>
+                        <pre className="output-block">{file.text}</pre>
+                      </details>
+                    ),
+                  )}
                 </div>
               ) : (
                 <p className="settings-help">

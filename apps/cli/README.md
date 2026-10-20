@@ -14,9 +14,12 @@ memvora run --shell powershell -- "Get-ChildItem ."
 memvora run --shell cmd -- "echo hello"
 memvora sync
 memvora ask "What happened in the earlier failing test?"
+memvora ask "CodeIdentifier" --repository <authorized-repository-uuid>
 memvora session start "Investigate startup failure"
 memvora session end
 ```
+
+Ask searches command memories and bounded imported code through the same protected API. The repository option uses the explicit `--api-url`/environment/default connection and the requested repository ID, independently of the current folder binding; the API still verifies access. Normal binding lookup stops at the current Git root, so unrelated ancestor settings cannot bind a new project. A corrupt binding inside the current repository remains an error. File citations include immutable source IDs and source-detail locators. Imported code is source content, not proof that a command ran or a fix worked.
 
 `init` registers an explicit local repository with the authenticated API and creates an investigation session. An existing ID can be selected with `init --repository-id <id>`. This is local access, not evidence of GitHub App authorization. The repo binding and SQLite outbox live in `<repository>/.memvora`; keep that folder ignored. The server credential remains in the application data directory even when capturing an external repository.
 
