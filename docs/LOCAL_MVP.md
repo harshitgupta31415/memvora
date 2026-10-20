@@ -155,6 +155,18 @@ Deletion actions currently use the guarded local API; the settings screen has no
 
 Imported-file detail opens at `/sources/[id]?startLine=N&limit=100`, showing immutable provenance and bounded stored-snapshot lines.
 
+### Browse older investigation history
+
+The website provides Earlier attempts, Later attempts, page-size selection and Refresh latest. The CLI exposes the same route as `memvora session show [authorized-session-uuid] --limit 5`, with optional `--cursor` for a returned navigation cursor. Without an explicit UUID it uses the bound current investigation; an explicit UUID uses the explicit/environment/default connection independently of folder bindings. Output is validated JSON containing the original events, their linked summaries and page metadata.
+
+The session history view and MCP can navigate beyond the legacy latest-100-event window. The local API route is `GET /v1/sessions/:id/events?limit=20`. The first page contains the latest accepted events, ordered by session sequence. Follow its `page.olderCursor` to earlier events and `page.newerCursor` to later events in the same snapshot. API limits are 1–50 events per page; MCP uses 1–10, default five. Empty pages expose null sequence boundaries and navigation cursors rather than invented history.
+
+Navigation fixes the set of events accepted at the first request. Later uploads are excluded even if they have earlier sequence numbers. A fresh request without a cursor starts a new snapshot. `page.snapshotEventCount` stays fixed while `session.eventCount` reports the live accepted total, so those counts can differ. Enrichment can finish while browsing; source events remain authoritative and page-associated memories can change independently of fixed event membership.
+
+Cursors are opaque, signed and bound to the authenticated workspace/repository/session generations. Return them unchanged and URL-encoded, with the same session ID. They do not grant access. Tampered or wrong-session cursors are rejected; deletion makes the old scope unavailable and does not allow an old cursor to recreate evidence. The original `GET /v1/sessions/:id` still provides its latest-100 window for compatibility; use `/events` for paged history.
+
+After building and starting the app, run `npm run acceptance:history` to verify earlier/later API, CLI and real MCP stdio navigation against an existing investigation with at least three captured events. It seeds no evidence, pins the same snapshot across adapters and writes the ignored `.memvora/history-acceptance.json` report. Large MCP pages adapt their excerpts to a 96 KiB total response budget while retaining every event ID and navigation cursor.
+
 ## 7. Optional GitHub context
 
 Use your existing `gh auth login` identity. The repository page can browse accessible repositories and explicitly import a bounded snapshot: up to 20 supported small text files, 256 KiB total, recent issue/PR metadata and commit provenance. Large repositories are intentionally partial. Import does not run repository code.
@@ -200,7 +212,7 @@ Build services, then configure the MCP host to launch direct Node with the absol
 }
 ```
 
-Host configuration details vary by client. Available tools: `memvora_status`, `search_memory(query, repositoryIds?, limit?)`, `get_memory(id)` and `get_session_context(id, limit?)`. They use the API, retain source IDs and return bounded excerpts. Session tools report total event count separately from the latest-100-event window. No tool runs commands or edits code. Diagnostic output uses stderr. See [the adapter guide](../apps/mcp/README.md).
+Host configuration details vary by client. Available tools include `memvora_status`, `search_memory(query, repositoryIds?, limit?)`, `get_memory(id)` and `get_session_context(id, cursor?, limit?)`, plus the imported-source tools described in the adapter guide. They use the API, retain source IDs and return bounded excerpts. Session context returns snapshot page metadata so earlier work can be retrieved through `olderCursor` instead of stopping at 100 events. No tool runs commands or edits code. Diagnostic output uses stderr. See [the adapter guide](../apps/mcp/README.md).
 
 For custom configuration, set `MEMVORA_API_URL` and the absolute `MEMVORA_DATA_DIR` in the MCP server environment. The adapter does not load the root `.env`. If the API uses an explicit `MEMVORA_LOCAL_TOKEN` override, provide that same value through the host's private environment/secret settings; never commit it in the JSON configuration.
 

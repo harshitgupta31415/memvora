@@ -88,7 +88,7 @@ export const EventSchema = object({
   eventId: IdSchema,
   repositoryId: IdSchema,
   sessionId: IdSchema,
-  sequence: Type.Integer({ minimum: 1 }),
+  sequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   startedAt: TimestampSchema,
   endedAt: TimestampSchema,
   command: object({
@@ -277,6 +277,31 @@ export const SessionContextSchema = object({
   memories: Type.Array(MemorySchema),
 });
 export type SessionContext = Type.Static<typeof SessionContextSchema>;
+export const SessionEventsQuerySchema = object({
+  cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+});
+export type SessionEventsQuery = Type.Static<typeof SessionEventsQuerySchema>;
+export const SessionEventsPageSchema = object({
+  session: SessionSchema,
+  events: Type.Array(EventSchema, { maxItems: 50 }),
+  memories: Type.Array(MemorySchema, { maxItems: 50 }),
+  page: object({
+    snapshotEventCount: Type.Integer({ minimum: 0 }),
+    returnedEvents: Type.Integer({ minimum: 0, maximum: 50 }),
+    firstSequence: Type.Union([
+      Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+      Type.Null(),
+    ]),
+    lastSequence: Type.Union([
+      Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+      Type.Null(),
+    ]),
+    olderCursor: Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()]),
+    newerCursor: Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()]),
+  }),
+});
+export type SessionEventsPage = Type.Static<typeof SessionEventsPageSchema>;
 export const SearchRequestSchema = object({
   query: Type.String({ minLength: 1, maxLength: 2000 }),
   repositoryIds: Type.Optional(Type.Array(IdSchema, { maxItems: 20 })),

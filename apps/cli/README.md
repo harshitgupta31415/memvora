@@ -16,6 +16,9 @@ memvora sync
 memvora ask "What happened in the earlier failing test?"
 memvora ask "CodeIdentifier" --repository <authorized-repository-uuid>
 memvora session start "Investigate startup failure"
+memvora session show
+memvora session show <authorized-session-uuid> --limit 5
+memvora session show <authorized-session-uuid> --limit 5 --cursor <older-or-newer-cursor>
 memvora session end
 ```
 
@@ -32,5 +35,7 @@ In local development, the capture child does not inherit Memvora's `MEMVORA_LOCA
 Initial conservative limits: 128 KiB persisted output per invocation, 32 KiB per diff, 500 output chunks, 16 KiB buffered line, and 500 MiB local database admission cap. Streams continue draining after output limits; truncation is recorded. Overlong lines and private-key blocks are suppressed. Common token/password patterns and the local API credential are redacted before persistence/display. Detection is imperfect; do not deliberately run commands that print sensitive data. Untracked file contents are not captured; tracked environment/key files are excluded from diffs.
 
 Suppressed overlong-line bytes count toward truncation and make capture incomplete. Output truncation and externally signaled termination are also explicitly incomplete; a signaled process is recorded as interrupted rather than as a successful completion.
+
+`session show` prints a validated JSON page containing original events, their linked memories and navigation cursors. With an explicit session UUID it uses the explicit/environment/default API connection independently of folder bindings; without one it uses the current bound session. The default page contains the latest 20 events in chronological order; limits from 1 to 50 are accepted. Follow `page.olderCursor` or `page.newerCursor` with the same limit to inspect a fixed intake snapshot, including histories longer than 100 commands. Omit the cursor to refresh membership. Summaries and current session counts can change as workers finish or new evidence arrives. Cursors remain valid across a server restart but never grant access to deleted or unavailable evidence.
 
 `ask` prints the API's observed-evidence label, historical steps, source IDs and uncertainty. It does not invent an AI summary or run a recommended fix. Child failure status is preserved where representable. This local CLI is private and has not been published as an npm package.

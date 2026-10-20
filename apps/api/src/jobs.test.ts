@@ -340,7 +340,7 @@ describe('local enrichment job controls', () => {
     }
     const tooNew = new DatabaseSync(path);
     try {
-      tooNew.exec('PRAGMA user_version=5;');
+      tooNew.exec('PRAGMA user_version=6;');
     } finally {
       tooNew.close();
     }

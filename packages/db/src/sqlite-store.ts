@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -21,6 +21,8 @@ import type {
   SearchRequest,
   Session,
   SessionContext,
+  SessionEventsPage,
+  SessionEventsQuery,
 } from '@memvora/contracts';
 import { DomainError, newId, redactText } from '@memvora/core';
 import type { AcceptedEvent, EnrichmentJob, LocalEvidenceStore } from '@memvora/core';
@@ -28,10 +30,31 @@ import {
   localFtsMigrationSql,
   localRepositorySourcesMigrationSql,
   localRetryMigrationSql,
+  localSessionHistoryMigrationSql,
   localSchemaSql,
 } from './sqlite-schema.js';
 
 type Row = Record<string, SQLOutputValue>;
+type HistoryCursor = {
+  version: 1;
+  userId: string;
+  workspaceId: string;
+  repositoryId: string;
+  sessionId: string;
+  workspaceGeneration: number;
+  repositoryGeneration: number;
+  sessionGeneration: number;
+  watermark: number;
+  snapshotEventCount: number;
+  direction: 'older' | 'newer';
+  boundary: number;
+};
+const invalidCursor = () =>
+  new DomainError(
+    'INVALID_CURSOR',
+    'The history cursor is invalid or no longer applies to this scope.',
+    400,
+  );
 const string = (row: Row, key: string): string => String(row[key]);
 const integer = (row: Row, key: string): number => Number(row[key]);
 const nullable = (row: Row, key: string): string | null =>
@@ -91,6 +114,7 @@ function boundedExcerpt(lines: string[], startLine: number, limit: number) {
 export class SqliteEvidenceStore implements LocalEvidenceStore {
   readonly path: string;
   private readonly database: DatabaseSync;
+  private readonly historyCursorSecret: Buffer;
   private closed = false;
 
   constructor(path: string) {
@@ -98,7 +122,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     if (this.path !== ':memory:') mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     this.database = new DatabaseSync(this.path, { timeout: 5_000 });
     const version = this.one('PRAGMA user_version');
-    if (version && integer(version, 'user_version') > 4) {
+    if (version && integer(version, 'user_version') > 5) {
       this.database.close();
       throw new Error('Local database schema is newer than this application.');
     }
@@ -106,7 +130,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     this.transaction(() => {
       // Re-read after BEGIN IMMEDIATE: another process may have migrated while this one waited.
       const currentVersion = integer(this.one('PRAGMA user_version') ?? {}, 'user_version');
-      if (currentVersion > 4)
+      if (currentVersion > 5)
         throw new Error('Local database schema is newer than this application.');
       if (currentVersion < 2) {
         this.database.exec(localFtsMigrationSql);
@@ -116,6 +140,14 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
         this.database.exec(localRepositorySourcesMigrationSql);
         this.backfillRepositorySources();
         this.database.exec('PRAGMA user_version=4');
+      }
+      if (currentVersion < 5) {
+        this.database.exec(localSessionHistoryMigrationSql);
+        this.run(
+          'INSERT INTO local_history_state(singleton,cursor_secret) VALUES(1,?) ON CONFLICT(singleton) DO NOTHING',
+          randomBytes(32).toString('hex'),
+        );
+        this.database.exec('PRAGMA user_version=5');
       }
     });
     this.transaction(() => {
@@ -135,6 +167,14 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
         );
       }
     });
+    const historySecret = this.one(
+      'SELECT cursor_secret FROM local_history_state WHERE singleton=1',
+    );
+    if (!historySecret || !/^[a-f0-9]{64}$/.test(string(historySecret, 'cursor_secret'))) {
+      this.database.close();
+      throw new Error('The persisted history cursor key is missing or invalid.');
+    }
+    this.historyCursorSecret = Buffer.from(string(historySecret, 'cursor_secret'), 'hex');
   }
 
   private one(sql: string, ...values: SQLInputValue[]): Row | undefined {
@@ -146,8 +186,8 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   private run(sql: string, ...values: SQLInputValue[]) {
     return this.database.prepare(sql).run(...values);
   }
-  private transaction<T>(action: () => T): T {
-    this.database.exec('BEGIN IMMEDIATE');
+  private transaction<T>(action: () => T, mode: 'write' | 'read' = 'write'): T {
+    this.database.exec(mode === 'read' ? 'BEGIN' : 'BEGIN IMMEDIATE');
     try {
       const result = action();
       this.database.exec('COMMIT');
@@ -618,6 +658,218 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     ).map((row) => parse<Memory>(row['summary_json']));
     return { session, events, memories };
   }
+  private encodeHistoryCursor(value: HistoryCursor): string {
+    const body = Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+    const signature = createHmac('sha256', this.historyCursorSecret)
+      .update(body)
+      .digest('base64url');
+    return `${body}.${signature}`;
+  }
+  private decodeHistoryCursor(token: string): HistoryCursor {
+    try {
+      if (!token || token.length > 2048 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token))
+        throw invalidCursor();
+      const [body, signature] = token.split('.');
+      if (!body || !signature) throw invalidCursor();
+      const decoded = Buffer.from(body, 'base64url');
+      const supplied = Buffer.from(signature, 'base64url');
+      if (decoded.toString('base64url') !== body || supplied.toString('base64url') !== signature)
+        throw invalidCursor();
+      const expected = createHmac('sha256', this.historyCursorSecret).update(body).digest();
+      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected))
+        throw invalidCursor();
+      const value: unknown = JSON.parse(decoded.toString('utf8'));
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalidCursor();
+      const data = value as Record<string, unknown>;
+      const names = [
+        'version',
+        'userId',
+        'workspaceId',
+        'repositoryId',
+        'sessionId',
+        'workspaceGeneration',
+        'repositoryGeneration',
+        'sessionGeneration',
+        'watermark',
+        'snapshotEventCount',
+        'direction',
+        'boundary',
+      ];
+      if (
+        Object.keys(data).sort().join(',') !== names.sort().join(',') ||
+        data['version'] !== 1 ||
+        !['older', 'newer'].includes(String(data['direction']))
+      )
+        throw invalidCursor();
+      for (const name of ['userId', 'workspaceId', 'repositoryId', 'sessionId'])
+        if (typeof data[name] !== 'string') throw invalidCursor();
+      for (const name of [
+        'workspaceGeneration',
+        'repositoryGeneration',
+        'sessionGeneration',
+        'watermark',
+        'snapshotEventCount',
+        'boundary',
+      ]) {
+        const item = data[name];
+        if (typeof item !== 'number' || !Number.isSafeInteger(item) || item < 1)
+          throw invalidCursor();
+      }
+      return value as HistoryCursor;
+    } catch {
+      throw invalidCursor();
+    }
+  }
+  getSessionEvents(
+    context: LocalContext,
+    id: string,
+    query: SessionEventsQuery = {},
+  ): SessionEventsPage {
+    if (
+      !query ||
+      typeof query !== 'object' ||
+      Array.isArray(query) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(query)) ||
+      Object.keys(query).some((key) => !['cursor', 'limit'].includes(key))
+    )
+      throw new DomainError('INVALID_HISTORY_QUERY', 'The history query is invalid.', 400);
+    if (query.limit !== undefined && typeof query.limit !== 'number')
+      throw new DomainError(
+        'INVALID_HISTORY_QUERY',
+        'History page size must be an integer from 1 to 50.',
+        400,
+      );
+    const limit = query.limit ?? 20;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50)
+      throw new DomainError(
+        'INVALID_HISTORY_QUERY',
+        'History page size must be an integer from 1 to 50.',
+        400,
+      );
+    if (
+      query.cursor !== undefined &&
+      (typeof query.cursor !== 'string' || query.cursor.length > 2048)
+    )
+      throw invalidCursor();
+    return this.transaction(() => {
+      const session = this.sessionRow(context, id);
+      const repository = this.repositoryRow(context, string(session, 'repository_id'));
+      const scope = {
+        userId: context.user.id,
+        workspaceId: context.workspace.id,
+        repositoryId: string(repository, 'id'),
+        sessionId: id,
+        workspaceGeneration: context.workspace.generation,
+        repositoryGeneration: integer(repository, 'generation'),
+        sessionGeneration: integer(session, 'generation'),
+      };
+      const cursor = query.cursor === undefined ? null : this.decodeHistoryCursor(query.cursor);
+      if (
+        cursor &&
+        Object.entries(scope).some(([key, value]) => cursor[key as keyof HistoryCursor] !== value)
+      )
+        throw invalidCursor();
+      const watermark =
+        cursor?.watermark ??
+        integer(
+          this.one(
+            'SELECT coalesce(max(i.id),0) AS watermark FROM local_event_intakes i JOIN local_events e ON e.id=i.event_id WHERE e.workspace_id=? AND e.repository_id=? AND e.session_id=?',
+            context.workspace.id,
+            scope.repositoryId,
+            id,
+          ) ?? {},
+          'watermark',
+        );
+      const snapshotEventCount = integer(
+        this.one(
+          'SELECT count(*) AS count FROM local_events e JOIN local_event_intakes i ON i.event_id=e.id WHERE e.workspace_id=? AND e.repository_id=? AND e.session_id=? AND i.id<=?',
+          context.workspace.id,
+          scope.repositoryId,
+          id,
+          watermark,
+        ) ?? {},
+        'count',
+      );
+      if (
+        !Number.isSafeInteger(watermark) ||
+        watermark < 0 ||
+        !Number.isSafeInteger(snapshotEventCount) ||
+        snapshotEventCount < 0 ||
+        (cursor && cursor.snapshotEventCount !== snapshotEventCount)
+      )
+        throw invalidCursor();
+      const direction = cursor?.direction ?? 'older';
+      const condition = cursor ? ` AND e.sequence${direction === 'older' ? '<' : '>'}?` : '';
+      const rows = this.rows(
+        `SELECT e.id,e.sequence,e.payload_json FROM local_events e JOIN local_event_intakes i ON i.event_id=e.id WHERE e.workspace_id=? AND e.repository_id=? AND e.session_id=? AND i.id<=?${condition} ORDER BY e.sequence ${direction === 'older' ? 'DESC' : 'ASC'} LIMIT ?`,
+        context.workspace.id,
+        scope.repositoryId,
+        id,
+        watermark,
+        ...(cursor ? [cursor.boundary] : []),
+        limit,
+      );
+      if (direction === 'older') rows.reverse();
+      const events = rows.map((row) => parse<CapturedEvent>(row['payload_json']));
+      const firstSequence = events[0]?.sequence ?? null;
+      const lastSequence = events.at(-1)?.sequence ?? null;
+      if (
+        (firstSequence !== null && (!Number.isSafeInteger(firstSequence) || firstSequence < 1)) ||
+        (lastSequence !== null && (!Number.isSafeInteger(lastSequence) || lastSequence < 1))
+      )
+        throw invalidCursor();
+      const exists = (boundary: number, comparison: '<' | '>') =>
+        Boolean(
+          this.one(
+            `SELECT 1 FROM local_events e JOIN local_event_intakes i ON i.event_id=e.id WHERE e.workspace_id=? AND e.repository_id=? AND e.session_id=? AND i.id<=? AND e.sequence${comparison}? LIMIT 1`,
+            context.workspace.id,
+            scope.repositoryId,
+            id,
+            watermark,
+            boundary,
+          ),
+        );
+      const makeCursor = (navigation: 'older' | 'newer', boundary: number) =>
+        this.encodeHistoryCursor({
+          version: 1,
+          ...scope,
+          watermark,
+          snapshotEventCount,
+          direction: navigation,
+          boundary,
+        });
+      const olderCursor =
+        firstSequence !== null && exists(firstSequence, '<')
+          ? makeCursor('older', firstSequence)
+          : null;
+      const newerCursor =
+        lastSequence !== null && exists(lastSequence, '>')
+          ? makeCursor('newer', lastSequence)
+          : null;
+      const memories = rows.length
+        ? this.rows(
+            `SELECT m.summary_json FROM local_memories m JOIN local_events e ON e.id=m.event_id WHERE m.workspace_id=? AND m.repository_id=? AND m.session_id=? AND m.event_id IN (${rows.map(() => '?').join(',')}) ORDER BY e.sequence ASC`,
+            context.workspace.id,
+            scope.repositoryId,
+            id,
+            ...rows.map((row) => string(row, 'id')),
+          ).map((row) => parse<Memory>(row['summary_json']))
+        : [];
+      return {
+        session: this.sessionDto(session),
+        events,
+        memories,
+        page: {
+          snapshotEventCount,
+          returnedEvents: events.length,
+          firstSequence,
+          lastSequence,
+          olderCursor,
+          newerCursor,
+        },
+      };
+    }, 'read');
+  }
   closeSession(context: LocalContext, id: string): Session {
     return this.transaction(() => {
       this.sessionRow(context, id);
@@ -675,6 +927,11 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     return this.transaction(() => {
       this.requireContext(context);
       for (const { event, digest } of events) {
+        if (!Number.isSafeInteger(event.sequence) || event.sequence < 1)
+          throw new DomainError(
+            'INVALID_EVENT_SEQUENCE',
+            'Event sequence must be a positive safe integer.',
+          );
         const repository = this.repositoryRow(context, event.repositoryId);
         const session = this.sessionRow(context, event.sessionId);
         if (session['repository_id'] !== event.repositoryId) throw notFound();
@@ -715,6 +972,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
           JSON.stringify(event),
           now(),
         );
+        this.run('INSERT INTO local_event_intakes(event_id) VALUES(?)', event.eventId);
         this.run(
           'INSERT INTO local_jobs(id,event_id,workspace_id,repository_id,session_id,workspace_generation,repository_generation,session_generation,available_at) VALUES(?,?,?,?,?,?,?,?,?)',
           event.eventId,

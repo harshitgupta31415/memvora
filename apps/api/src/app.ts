@@ -30,6 +30,8 @@ import {
   SearchRequestSchema,
   SearchResponseSchema,
   SessionContextSchema,
+  SessionEventsPageSchema,
+  SessionEventsQuerySchema,
   SessionListSchema,
   SessionResponseSchema,
   SettingsSchema,
@@ -246,6 +248,18 @@ export function buildApp(options: AppOptions = {}) {
     '/v1/sessions/:id',
     { schema: { params: idParams, response: { 200: SessionContextSchema } } },
     async (request) => store.getSession(service.context(), request.params.id),
+  );
+  app.get(
+    '/v1/sessions/:id/events',
+    {
+      schema: {
+        params: idParams,
+        querystring: SessionEventsQuerySchema,
+        response: { 200: SessionEventsPageSchema },
+      },
+    },
+    async (request) =>
+      store.getSessionEvents(service.context(), request.params.id, { ...request.query }),
   );
   app.post(
     '/v1/sessions/:id/close',

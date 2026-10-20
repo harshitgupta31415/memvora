@@ -2,8 +2,15 @@
 import { Command } from 'commander';
 import { basename, join, resolve } from 'node:path';
 import { mkdirSync } from 'node:fs';
-import type { EventAck, LocalContext, RecallAnswer, Repository, Session } from '@memvora/contracts';
-import { IdSchema } from '@memvora/contracts';
+import type {
+  EventAck,
+  LocalContext,
+  RecallAnswer,
+  Repository,
+  Session,
+  SessionEventsPage,
+} from '@memvora/contracts';
+import { IdSchema, SessionEventsPageSchema, SessionEventsQuerySchema } from '@memvora/contracts';
 import { Check } from 'typebox/value';
 import {
   apiRequest,
@@ -201,6 +208,37 @@ session.command('end').action(async () => {
   writeBinding(root, remaining);
   console.log(`Ended session ${ended}. This does not mark the issue fixed.`);
 });
+session
+  .command('show [id]')
+  .description(
+    'Read an investigation page as JSON; defaults to the latest attempts of the bound session.',
+  )
+  .option('--limit <count>', 'Events per page, from 1 to 50', '20')
+  .option('--cursor <cursor>', 'Older or newer cursor from the previous page; keep the same limit')
+  .action(async (id: string | undefined, options: { limit: string; cursor?: string }) => {
+    const query = {
+      limit: /^\d+$/.test(options.limit) ? Number(options.limit) : Number.NaN,
+      ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
+    };
+    if (!Check(SessionEventsQuerySchema, query))
+      throw new Error(
+        'Use a page limit from 1 to 50 and a nonempty cursor of at most 2048 characters.',
+      );
+    const binding = id ? undefined : bound().binding;
+    const sessionId = id ?? binding?.sessionId;
+    if (!Check(IdSchema, sessionId)) throw new Error('An authorized session UUID is required.');
+    const { origin, token } = connection(binding);
+    const params = new URLSearchParams({ limit: String(query.limit) });
+    if (query.cursor) params.set('cursor', query.cursor);
+    const result = await apiRequest<SessionEventsPage>(
+      origin,
+      token,
+      `/v1/sessions/${sessionId}/events?${params.toString()}`,
+    );
+    if (!Check(SessionEventsPageSchema, result))
+      throw new Error('Session response failed the shared runtime contract.');
+    console.log(JSON.stringify(result, null, 2));
+  });
 
 program
   .command('run')

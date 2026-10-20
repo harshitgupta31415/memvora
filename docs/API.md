@@ -2,7 +2,35 @@
 
 This document retains the original **hosted-target contract plan**. It is not the current implementation inventory: later sections include planned browser/device authentication, PostgreSQL-oriented behavior and historical starter wording. Use [LOCAL_MVP.md](LOCAL_MVP.md) for the actual local implementation and `packages/contracts/src/local.ts` for its schemas.
 
-The local code now includes SQLite-backed evidence intake, repository/session routes, observed memories, cited ask, a real command wrapper and three MCP retrieval tools. It uses a trusted-machine loopback credential, not the hosted login/pairing system described below. GitHub browsing/import uses an explicit local `gh` bridge; AI is optional and disabled by default. Integration and acceptance results remain separately recorded. Shared runtime validation continues through `packages/contracts`.
+The local code now includes SQLite-backed evidence intake, repository/session routes, observed memories, cited ask, a real command wrapper and read-only MCP retrieval tools. It uses a trusted-machine loopback credential, not the hosted login/pairing system described below. GitHub browsing/import uses an explicit local `gh` bridge; AI is optional and disabled by default. Integration and acceptance results remain separately recorded. Shared runtime validation continues through `packages/contracts`.
+
+## Implemented local session-history pagination
+
+`GET /v1/sessions/:id/events` returns an authenticated, bounded page across the complete accepted session history. The strict query accepts only optional `cursor` (1–2,048 characters) and `limit` (1–50, default 20). With no cursor, it opens a new durable-intake snapshot and returns its latest events in ascending session-sequence order. `olderCursor` and `newerCursor` navigate that same snapshot; a null cursor means no events remain in that direction.
+
+```ts
+type SessionEventsPage = {
+  session: Session;
+  events: CapturedEvent[];
+  memories: Memory[];
+  page: {
+    snapshotEventCount: number;
+    returnedEvents: number;
+    firstSequence: number | null;
+    lastSequence: number | null;
+    olderCursor: string | null;
+    newerCursor: string | null;
+  };
+};
+```
+
+An empty snapshot has no events, null sequence boundaries and null navigation cursors. Each page contains memories associated with its returned events; raw events remain usable when enrichment is pending or has failed. `session.eventCount` is the live accepted count and may differ from the fixed `snapshotEventCount`. Summary processing and live session metadata can change while paging; the snapshot fixes event membership, not an immutable view of every derived summary.
+
+Later uploads cannot enter an existing snapshot, even if their session sequence is earlier than the first page. This uses a durable intake watermark as well as keyset boundaries, rather than treating the largest sequence as a sufficient snapshot. Refresh without a cursor to include new uploads. Clients must pass returned opaque cursors unchanged and URL-encode them; do not derive a cursor from sequence numbers or edit its contents.
+
+The signed cursor is bound to the authenticated user/workspace, repository, session and their generations. It is navigation state, never an authorization credential. Invalid, altered or wrong-session cursors return 400 `INVALID_CURSOR` after live access checks. Deleted/inaccessible sessions or repositories return 404; an unavailable/deleted workspace returns 403. Deletion and generation fences apply on every page. The cursor-signing key persists with local storage so valid navigation can survive an API restart while the scope remains active.
+
+The existing `GET /v1/sessions/:id` remains the legacy latest-100-event window for compatibility. New history browsing and MCP `get_session_context` use `/events` so work older than 100 accepted events remains navigable. The MCP tool defaults to five events, accepts up to ten, forwards an optional cursor, and returns the same page metadata with explicitly shortened output/diff excerpts. The hosted pagination targets later in this document are separate from these implemented local limits.
 
 ## Implemented local imported-code retrieval
 

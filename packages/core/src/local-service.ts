@@ -19,6 +19,8 @@ import type {
   SearchRequest,
   Session,
   SessionContext,
+  SessionEventsPage,
+  SessionEventsQuery,
 } from '@memvora/contracts';
 import { clipRepositorySourceMatch } from './source-excerpts.js';
 
@@ -76,6 +78,11 @@ export interface LocalEvidenceStore {
   sessions(context: LocalContext, repositoryId?: string, limit?: number): Session[];
   createSession(context: LocalContext, input: CreateSession): Session;
   getSession(context: LocalContext, id: string): SessionContext;
+  getSessionEvents(
+    context: LocalContext,
+    id: string,
+    query?: SessionEventsQuery,
+  ): SessionEventsPage;
   closeSession(context: LocalContext, id: string): Session;
   getEvent(context: LocalContext, id: string): CapturedEvent;
   neighborEvents(context: LocalContext, eventId: string, radius?: number): CapturedEvent[];
@@ -172,6 +179,8 @@ export function prepareEvents(events: CapturedEvent[]): AcceptedEvent[] {
     throw new DomainError('BATCH_LIMIT', 'Batch exceeds the 2 MiB limit.', 413);
   const accepted = new Map<string, AcceptedEvent>();
   for (const input of events) {
+    if (!Number.isSafeInteger(input.sequence) || input.sequence < 1)
+      throw new DomainError('INVALID_SEQUENCE', 'Event sequence must be a positive safe integer.');
     if (Buffer.byteLength(JSON.stringify(input), 'utf8') > captureLimits.eventBytes)
       throw new DomainError('EVENT_LIMIT', 'Event exceeds the 512 KiB limit.', 413);
     const start = Date.parse(input.startedAt);

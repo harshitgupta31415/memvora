@@ -159,3 +159,17 @@ CREATE TRIGGER IF NOT EXISTS local_repository_source_head_update AFTER UPDATE OF
     SELECT id,full_name || char(10) || path || char(10) || text FROM local_repository_sources WHERE id=new.source_id;
 END;
 `;
+
+/** Version 5 assigns durable intake membership independently from command sequence or rowid reuse. */
+export const localSessionHistoryMigrationSql = `
+CREATE TABLE IF NOT EXISTS local_event_intakes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT NOT NULL UNIQUE REFERENCES local_events(id) ON DELETE CASCADE
+) STRICT;
+CREATE TABLE IF NOT EXISTS local_history_state (
+  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+  cursor_secret TEXT NOT NULL CHECK(length(cursor_secret)=64)
+) STRICT;
+INSERT INTO local_event_intakes(event_id)
+  SELECT e.id FROM local_events e WHERE NOT EXISTS(SELECT 1 FROM local_event_intakes i WHERE i.event_id=e.id) ORDER BY e.rowid ASC;
+`;
