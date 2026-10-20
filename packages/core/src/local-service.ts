@@ -23,6 +23,7 @@ import type {
   SessionEventsQuery,
 } from '@memvora/contracts';
 import { clipRepositorySourceMatch } from './source-excerpts.js';
+import type { GitHubConnectionStore } from './github-connection.js';
 
 export const captureLimits = {
   batchEvents: 50,
@@ -55,7 +56,7 @@ export type EnrichmentJob = {
   attempts: number;
 };
 /** The adapter must apply scope predicates inside every read and atomic write. */
-export interface LocalEvidenceStore {
+export interface LocalEvidenceStore extends GitHubConnectionStore {
   readonly path: string;
   context(): LocalContext;
   repositories(context: LocalContext): Repository[];
@@ -67,6 +68,7 @@ export interface LocalEvidenceStore {
     id: string,
     value: RepositoryContext,
     expectedRepositoryGeneration?: number,
+    expectedGitHubRevision?: number,
   ): void;
   getRepositoryContext(context: LocalContext, id: string): RepositoryContext | null;
   searchRepositorySources(context: LocalContext, input: SearchRequest): RepositorySourceMatch[];

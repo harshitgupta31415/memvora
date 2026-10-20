@@ -45,8 +45,8 @@ The smoke command deliberately exits unsuccessfully. It is a test input, not a c
 | Delivery    | SQLite outbox, immutable retries and exact committed-event acknowledgements; failed sync retains pending evidence.                                                                             |
 | Memory      | Durable local background jobs; default summaries are explicitly labeled observations, with source event IDs and uncertainty.                                                                   |
 | Recall      | Website, `memvora ask` and MCP call the same authenticated local API. Recall does not execute a fix.                                                                                           |
-| MCP         | `search_memory`, `get_memory`, `get_session_context` and `memvora_status` over stdio. Source excerpts are bounded.                                                                             |
-| GitHub      | Explicit bounded repository browsing/import through your existing authenticated `gh` CLI. No continuous App sync is implied.                                                                   |
+| MCP         | Read-only command-memory, paged investigation and versioned repository-file tools over stdio, with bounded cited excerpts.                                                                     |
+| GitHub      | Private GitHub App connection, verified installation selection and bounded import after owner configuration; existing `gh` access when App settings are absent.                                |
 | Optional AI | An HTTP enrichment adapter behind explicit configuration; default mode requires no provider. Real-provider acceptance is separate.                                                             |
 
 ## Guides and product plan

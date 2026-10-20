@@ -3,6 +3,7 @@ import { loadLocalToken, resolveDataDir, SqliteEvidenceStore } from '@memvora/db
 import { configuredEnricher } from '@memvora/enrichment';
 import { buildApp } from './app.js';
 import { registerGitHubRoutes } from './integrations/github.js';
+import { configuredGitHubOAuth } from './integrations/github-oauth.js';
 
 if (process.env['NODE_ENV'] === 'production')
   throw new Error(
@@ -18,11 +19,12 @@ const dataDir = resolveDataDir();
 const token = loadLocalToken({ create: true, dataDir });
 const store = new SqliteEvidenceStore(resolve(dataDir, 'server.sqlite'));
 const enricher = configuredEnricher();
+const githubOAuth = configuredGitHubOAuth(store, token);
 const app = buildApp({
   logger: true,
   store,
   token,
-  registerIntegrations: registerGitHubRoutes,
+  registerIntegrations: (instance, service) => registerGitHubRoutes(instance, service, githubOAuth),
   ...(enricher ? { enricher } : {}),
 });
 for (const signal of ['SIGINT', 'SIGTERM'] as const)

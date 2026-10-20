@@ -1,6 +1,7 @@
 import type { SystemStatus } from '@memvora/contracts';
 
 export * from './local-service.js';
+export * from './github-connection.js';
 
 /** Domain boundaries, not independently deployed services. */
 export const moduleNames = ['identity', 'github', 'capture', 'memory', 'retrieval'] as const;
@@ -18,7 +19,7 @@ export function getSystemStatus(options: { local?: boolean } = {}): SystemStatus
           label: 'Repository context',
           status: 'limited',
           detail:
-            'Local repository bindings and configured GitHub imports; hosted OAuth is separate.',
+            'Explicit bounded imports through a configured private GitHub App or local CLI access; continuous synchronization remains separate.',
         },
         {
           id: 'capture',

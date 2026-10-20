@@ -35,7 +35,8 @@
     "doctor": "node scripts/doctor.mjs",
     "acceptance:local": "node scripts/acceptance-local.mjs",
     "acceptance:sources": "node scripts/acceptance-sources.mjs",
-    "acceptance:history": "node scripts/acceptance-history.mjs"
+    "acceptance:history": "node scripts/acceptance-history.mjs",
+    "acceptance:github-oauth": "node scripts/acceptance-github-oauth.mjs"
   },
   "devDependencies": {
     "@types/node": "^24",

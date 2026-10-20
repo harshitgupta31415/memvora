@@ -3,18 +3,182 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Compile } from 'typebox/compile';
 import {
   GitHubImportResponseSchema,
+  GitHubInstallationListSchema,
   GitHubRepositoryListSchema,
+  type GitHubInstallation,
   type GitHubRepository,
   type GitHubStatus,
 } from '@memvora/contracts';
-import { submitJson } from '@/lib/client-api';
+import { getJson, submitJson } from '@/lib/client-api';
 import { Icon } from './icon';
-import { CopyCommand } from './controls';
 
 export function GitHubBrowser({ status }: { status: GitHubStatus }) {
+  // A different account or connection must never reuse an earlier browser list.
+  const identity = `${status.mode}:${status.user?.id ?? status.oauth.user?.id ?? 'none'}:${status.available}:${status.oauth.connected}:${status.oauth.expiresAt ?? ''}`;
+  return <GitHubAccessBrowser key={identity} status={status} />;
+}
+
+function GitHubAccessBrowser({ status }: { status: GitHubStatus }) {
+  const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
+  const [installationPage, setInstallationPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState('');
+  async function loadInstallations(next = 1) {
+    setLoading(true);
+    setError('');
+    if (next === 1) setSelected('');
+    try {
+      const result = await getJson(
+        `/api/github/installations?page=${next}`,
+        GitHubInstallationListSchema,
+      );
+      setInstallations((current) =>
+        next === 1
+          ? result.items
+          : [
+              ...current,
+              ...result.items.filter(
+                (item) => !current.some((previous) => previous.id === item.id),
+              ),
+            ],
+      );
+      setInstallationPage(result.page);
+      setHasMore(result.hasMore);
+      setLoaded(true);
+    } catch (failure) {
+      setInstallations([]);
+      setLoaded(false);
+      setSelected('');
+      setHasMore(false);
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : 'Authorized installations could not be listed.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+  const installation = installations.find((item) => String(item.id) === selected);
+  return (
+    <section className="panel section-padding section-top">
+      <div className="section-heading">
+        <div>
+          <h2>Bring in repository context</h2>
+          <p>
+            {status.mode === 'github_app'
+              ? 'Select an authorized App installation, then choose a repository for a bounded import.'
+              : status.mode === 'gh_cli'
+                ? 'Use the local GitHub CLI authorization to explicitly choose a repository.'
+                : 'Set up GitHub access before choosing a repository to import.'}
+          </p>
+        </div>
+        {status.available && status.mode === 'github_app' && (
+          <button
+            className="button button-small"
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              void loadInstallations();
+            }}
+          >
+            <Icon name="repo" size={14} />
+            {loading ? 'Loading…' : loaded ? 'Refresh installations' : 'Browse installations'}
+          </button>
+        )}
+      </div>
+      <p className="muted-caption">
+        {status.message} Imports store a bounded snapshot. Connecting or listing a repository does
+        not import it automatically.
+      </p>
+      {!status.available && (
+        <p className="settings-help">
+          Review the GitHub connection above before browsing repositories.
+        </p>
+      )}
+      {error && (
+        <p className="form-error section-top" role="alert">
+          {error}
+        </p>
+      )}
+      {status.available && status.mode === 'github_app' && loaded && (
+        <div className="github-installation-picker section-top">
+          <label>
+            <span>Authorized installation</span>
+            <select
+              className="select"
+              value={selected}
+              disabled={loading}
+              onChange={(event) => setSelected(event.target.value)}
+            >
+              <option value="">Choose an installation</option>
+              {installations.map((item) => (
+                <option key={item.id} value={item.id} disabled={item.suspended}>
+                  {item.accountLogin} ·{' '}
+                  {item.repositorySelection === 'selected'
+                    ? 'selected repositories'
+                    : 'all repositories'}
+                  {item.suspended ? ' · suspended' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          {hasMore && (
+            <button
+              type="button"
+              className="button button-small button-ghost"
+              disabled={loading}
+              onClick={() => {
+                void loadInstallations(installationPage + 1);
+              }}
+            >
+              {loading ? 'Loading…' : 'Load more installations'}
+            </button>
+          )}
+          {!installations.length && (
+            <p className="settings-help">
+              No authorized installation was returned on this page. Install the configured private
+              GitHub App for the required account and repositories using the setup instructions,
+              then refresh installations.
+            </p>
+          )}
+        </div>
+      )}
+      {status.available && status.mode === 'gh_cli' && <RepositoryPicker mode="gh_cli" />}
+      {status.available &&
+        status.mode === 'github_app' &&
+        installation &&
+        !installation.suspended && (
+          <div className="section-top">
+            <p className="muted-caption">
+              Installation {installation.id} · {installation.accountLogin} ·{' '}
+              {installation.repositorySelection === 'selected'
+                ? 'Only repositories selected in GitHub'
+                : 'Repositories authorized for this installation'}
+            </p>
+            <RepositoryPicker
+              key={installation.id}
+              mode="github_app"
+              installationId={installation.id}
+            />
+          </div>
+        )}
+    </section>
+  );
+}
+
+function RepositoryPicker({
+  mode,
+  installationId,
+}: {
+  mode: 'gh_cli' | 'github_app';
+  installationId?: number;
+}) {
   const router = useRouter();
   const [items, setItems] = useState<GitHubRepository[]>([]);
   const [page, setPage] = useState(0);
@@ -32,16 +196,11 @@ export function GitHubBrowser({ status }: { status: GitHubStatus }) {
   async function load(next = 1) {
     setLoading(true);
     setError('');
+    setImported(null);
     try {
-      const response = await fetch(`/api/github/repositories?page=${next}`, {
-        signal: AbortSignal.timeout(20_000),
-      });
-      const value: unknown = await response.json();
-      if (!response.ok || !Compile(GitHubRepositoryListSchema).Check(value))
-        throw new Error(
-          'GitHub repositories could not be listed. Check the local GitHub CLI authentication and try again.',
-        );
-      const result = value as { items: GitHubRepository[]; page: number; hasMore: boolean };
+      const query = new URLSearchParams({ page: String(next) });
+      if (installationId !== undefined) query.set('installationId', String(installationId));
+      const result = await getJson(`/api/github/repositories?${query}`, GitHubRepositoryListSchema);
       setItems((current) =>
         next === 1
           ? result.items
@@ -54,19 +213,42 @@ export function GitHubBrowser({ status }: { status: GitHubStatus }) {
       setHasMore(result.hasMore);
       setLoaded(true);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'GitHub is unavailable.');
+      setItems([]);
+      setLoaded(false);
+      setHasMore(false);
+      setError(
+        failure instanceof Error ? failure.message : 'GitHub repositories could not be listed.',
+      );
     } finally {
       setLoading(false);
     }
   }
-  async function importRepo(fullName: string) {
-    setPending(fullName);
+  async function importRepo(repo: GitHubRepository) {
+    setPending(repo.fullName);
     setError('');
     setImported(null);
     try {
+      if (
+        mode === 'github_app' &&
+        (installationId === undefined ||
+          repo.installationId !== installationId ||
+          repo.accessPage === undefined)
+      )
+        throw new Error(
+          'Repository access details are missing. Refresh the authorized repository list.',
+        );
+      const input =
+        mode === 'github_app'
+          ? {
+              fullName: repo.fullName,
+              installationId,
+              repositoryId: repo.id,
+              repositoryPage: repo.accessPage,
+            }
+          : { fullName: repo.fullName };
       const result = await submitJson(
         '/api/github/import',
-        { fullName },
+        input,
         GitHubImportResponseSchema,
         65_000,
       );
@@ -84,35 +266,18 @@ export function GitHubBrowser({ status }: { status: GitHubStatus }) {
     }
   }
   return (
-    <section className="panel section-padding section-top">
-      <div className="section-heading">
-        <div>
-          <h2>Bring in repository context</h2>
-          <p>
-            {status.available
-              ? `Using local GitHub CLI access${status.user ? ` for ${status.user.login}` : ''}. Select the repository you want to import.`
-              : 'Connect local GitHub CLI access, then explicitly choose a repository.'}
-          </p>
-        </div>
-        {status.available && (
-          <button
-            type="button"
-            className="button button-small"
-            onClick={() => {
-              void load();
-            }}
-            disabled={loading || !!pending}
-          >
-            <Icon name="repo" size={14} />
-            {loading ? 'Loading…' : loaded ? 'Refresh GitHub list' : 'Browse GitHub'}
-          </button>
-        )}
-      </div>
-      <p className="muted-caption">
-        {status.message} This bridge uses the GitHub CLI's existing authorization; it does not
-        install a GitHub App or complete browser OAuth.
-      </p>
-      {!status.available && <CopyCommand command="gh auth login" />}
+    <div className="github-repository-picker">
+      <button
+        type="button"
+        className="button button-small section-top"
+        onClick={() => {
+          void load();
+        }}
+        disabled={loading || !!pending}
+      >
+        <Icon name="repo" size={14} />
+        {loading ? 'Loading…' : loaded ? 'Refresh repository list' : 'Browse repositories'}
+      </button>
       {error && (
         <p className="form-error section-top" role="alert">
           {error}
@@ -128,8 +293,8 @@ export function GitHubBrowser({ status }: { status: GitHubStatus }) {
             </strong>
             <p>
               {imported.partial
-                ? 'This is a bounded partial import. Inspect the retained files before assuming a full codebase is available.'
-                : 'Repository context is stored locally with its source commit.'}
+                ? 'This bounded import is partial. Inspect the retained files before assuming more code is available.'
+                : 'A bounded repository snapshot is stored locally with its source commit.'}
             </p>
             <Link className="inline-link" href={`/repositories/${imported.id}`}>
               Inspect imported context <Icon name="arrow" size={12} />
@@ -157,7 +322,7 @@ export function GitHubBrowser({ status }: { status: GitHubStatus }) {
                   className="button button-small"
                   disabled={!!pending || loading}
                   onClick={() => {
-                    void importRepo(repo.fullName);
+                    void importRepo(repo);
                   }}
                 >
                   {pending === repo.fullName ? 'Importing…' : 'Import'}
@@ -167,7 +332,7 @@ export function GitHubBrowser({ status }: { status: GitHubStatus }) {
             ))
           ) : (
             <p className="settings-help section-top">
-              No repositories were returned for this account.
+              No repositories were returned for this authorized selection.
             </p>
           )}
           {hasMore && (
@@ -184,6 +349,6 @@ export function GitHubBrowser({ status }: { status: GitHubStatus }) {
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }

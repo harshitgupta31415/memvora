@@ -1,37 +1,84 @@
-# GitHub during local development
+# GitHub connection for local development
 
-The local MVP can browse and explicitly import repositories using your existing `gh auth login` identity. The API invokes `gh api` with fixed arguments; it does not export the keyring token or send it to the browser. The app's local bearer credential remains a separate credential.
+Memvora supports a personal, local GitHub App connection and an explicit GitHub CLI fallback. The App connection code does not require a public deployment, but using it against GitHub requires the account owner to register a private App, install it and complete browser authorization. Implementation and fake-provider tests are separate from a live owner-authorized check; see [STATUS.md](STATUS.md) for verified results.
 
-The repository page lists accessible repositories. Choose a repository to import a bounded snapshot: up to 20 small supported text files, 256 KiB total, recent issue/pull-request metadata, default branch and immutable commit SHA. The importer excludes sensitive/generated paths, applies known-pattern redaction, reports partial results, and stores snapshots under the repository's ownership. This is a manual local import, not continuous GitHub App synchronization. Large repositories are intentionally partial.
+This connects the GitHub integration to the existing local workspace. It does not create a hosted account or replace Memvora's local API bearer credential.
 
-## Recall imported code
+## Choose the connection mode
 
-Imported text files are searchable evidence alongside captured investigations. Ask a question containing an imported identifier, filename, path or code phrase; recall can return both command-history and file sources. Code is labeled as an imported snapshot, not a recorded fix or an executed check. Explicit requests to resume the last investigation continue to use command history. Optional per-event AI enrichment still receives execution evidence; this code-retrieval slice does not silently widen its provider inputs.
+| Configuration                                                                                            | Behavior                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| None of `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` or `GITHUB_CALLBACK_URL` has a value | The existing `gh auth login` identity can browse and explicitly import repositories. The API runs fixed `gh api` arguments without exporting its token to the browser. Restart the API after changing the GitHub CLI account. |
+| Complete, valid App configuration                                                                        | Use the GitHub App connection. Connect in Settings, then select an authorized installation and repository. The API does not fall back to `gh`, including when disconnected or temporarily unavailable.                        |
+| Any App setting has a value, but configuration is incomplete or invalid                                  | GitHub App actions fail closed with a setup message. Local capture and retained evidence remain usable. Remove all four App values and restart to deliberately return to GitHub CLI mode.                                     |
 
-File citations carry an immutable source ID, repository/path, redacted-content hash, available commit SHA and bounded line range. A source detail view opens the stored text. Line numbers refer to the stored redacted snapshot; secret removal can make them differ from the original GitHub file. An unknown commit remains unknown, without a fabricated commit or external GitHub line anchor.
+Do not paste a GitHub token, client secret or local API bearer token into the website. The browser receives connection status and selected repository metadata, never the stored GitHub access/refresh credentials.
 
-A later import changes the current searchable snapshot without rewriting an older cited source. Historical source IDs remain readable while the repository/workspace remains active, and are marked noncurrent. A file omitted from a bounded/partial import is not proven deleted from GitHub. A search miss is not proof that the symbol or behavior is absent from the complete codebase.
+## Register a private GitHub App
 
-Identical immutable versions may reuse their IDs; a source's `importedAt` records its first observation separately from the latest import time. Retained history has a per-repository admission cap of 32 MiB of stored file text or 2,000 file versions. Exceeding the cap rejects the new import rather than silently evicting cited versions. Repository/workspace deletion removes current and historical source access and search entries; a stale import cannot recreate a deleted repository.
+Use GitHub **Settings → Developer settings → GitHub Apps → New GitHub App**, rather than registering an OAuth App. The account owner completes this step when ready. Keep the project repository private. The following values are the intended local registration; consult [GitHub's registration instructions](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) for the settings screen.
 
-The read paths are `POST /v1/repository-sources/search` and `GET /v1/repository-sources/:id?startLine=1&limit=100`. Ask and read-only MCP retrieval use the same scoped API. Provider credentials, vector search and GitHub OAuth are not prerequisites for this lexical code-retrieval slice.
+| Registration field                             | Local value                                                                  |
+| ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| Name                                           | `Memvora-harshitgupta31415` or another available name owned by the developer |
+| Description                                    | `Private engineering memory with selected repository access.`                |
+| Homepage URL                                   | `http://127.0.0.1:3000`                                                      |
+| Callback URL                                   | `http://127.0.0.1:3000/api/github/oauth/callback`                            |
+| Expire user authorization tokens               | Enabled                                                                      |
+| Request user authorization during installation | Disabled; start authorization from Memvora                                   |
+| Enable Device Flow                             | Disabled                                                                     |
+| Setup URL                                      | `http://127.0.0.1:3000/settings`                                             |
+| Redirect on update                             | Disabled                                                                     |
+| Webhooks: Active                               | Disabled; no webhook URL or secret is needed for this slice                  |
+| Repository permissions                         | Metadata, Contents, Issues and Pull requests: read-only                      |
+| Other permissions                              | No access                                                                    |
+| Installation availability                      | Only on this account                                                         |
 
-If the CLI is unavailable, install the official GitHub CLI and sign in yourself. Restart the API after changing accounts. Do not paste a GitHub token into the website.
+Disable wildcard matching for the callback and register that exact URL, without a query string or fragment. Open Memvora at `http://127.0.0.1:3000` for this setup; `localhost` and `127.0.0.1` are different cookie hosts. The callback handles user authorization, while the plain Settings setup URL only returns to the app after installation. [GitHub callback matching](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/about-the-user-authorization-callback-url).
 
-## OAuth and a private GitHub App
+After creation, record the **App ID** and **Client ID**, then generate a **client secret**. These are distinct values. This slice uses GitHub App user access tokens; it does not require an App private key or an installation-token signing flow. Install the App on the owner's account, choose **Only select repositories**, and select the repository intended for the demo. An installation can also be configured for all repositories; Memvora still requires an explicit selection before importing. [Installing your own App](https://docs.github.com/en/apps/using-github-apps/installing-your-own-github-app).
 
-App registration and browser consent may need the account owner. The local `gh` bridge lets implementation and testing continue while those steps are pending. It must not be described as the product's future OAuth or installation-based authorization.
+`config/github-app-manifest.json` is a reference for these settings. Memvora does not implement the manifest submission/code-exchange registration flow. Register manually; do not use the old API-port callback or invent a manifest-exchange endpoint. Webhooks remain inactive in the reference.
 
-`config/github-app-manifest.json` is a draft private App registration with read-only contents, metadata, issues and pull-request permissions. The callback/webhook addresses describe the planned routes; do not submit the manifest until the callback exchange, stable identity, installation verification and durable webhook handlers are implemented and tested. Webhooks are disabled in the draft because GitHub cannot deliver to a loopback address on your laptop.
+## Configure and connect
 
-The eventual setup is:
+Copy `.env.example` to the ignored project-root `.env` if it does not exist. Set all required values together, with the values from the App registration:
 
-1. Register a private GitHub App, verify callback ownership, and store its client ID, secret, app ID and private key outside Git.
-2. Implement callback state/PKCE, stable numeric identity and a secure browser session. Installation credentials are distinct from the sign-in session.
-3. Install the app for selected repositories and verify user authority plus installation access on the server before binding them.
-4. Configure a reachable webhook URL only after raw HMAC verification, durable delivery intake, reconciliation and revocation are implemented.
-5. Keep the project repository and the App private unless the owner explicitly changes that requirement.
+```dotenv
+GITHUB_APP_ID=YOUR_NUMERIC_APP_ID
+GITHUB_CLIENT_ID=YOUR_APP_CLIENT_ID
+GITHUB_CLIENT_SECRET=YOUR_APP_CLIENT_SECRET
+GITHUB_CALLBACK_URL=http://127.0.0.1:3000/api/github/oauth/callback
+```
 
-No OAuth app, new account, public deployment or expanded GitHub authorization is required to run the local MVP.
+The first three values are required for App mode. The callback defaults to the URL shown, but explicitly setting it makes the registration easy to compare. Setting only the callback also requests App mode and therefore disables the GitHub CLI fallback. Keep secrets out of version control, screenshots, shell history and `NEXT_PUBLIC_*` variables.
 
-References: [GitHub App manifests](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest), [OAuth state and PKCE](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps), [installation tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
+Restart the API and website after changing configuration, using the resource-limited development command in [LOCAL_MVP.md](LOCAL_MVP.md). Open Settings and start the GitHub connection. Finish authorization in the same browser within ten minutes. Then open Repositories, select an installation, refresh its repository list if needed, and explicitly import the chosen repository. The server verifies the numeric GitHub user, App identity, active installation and repository membership; a public repository URL alone is insufficient authorization in App mode. The [installation APIs](https://docs.github.com/en/rest/apps/installations) expose the intersection of the App installation and the connected user's access.
+
+Canceling consent, using another browser, replaying a callback, or returning after expiry does not establish a connection. Start a new attempt. If access or installation selection changes while importing, refresh the selection and retry; the old request must not save a snapshot after a disconnect or deletion.
+
+## Authorization and credential lifecycle
+
+The Next.js callback is a server-side browser adapter. Start creates a short-lived HttpOnly, SameSite=Lax nonce cookie and sends only its SHA-256 binding to the protected API. The API stores a single-use hashed state and encrypted PKCE verifier for ten minutes. On return, the adapter validates its local host and cookie, then forwards the authorization code, state and browser binding with the server's local API credential. Fastify has no unauthenticated OAuth callback exception. Responses redirect to a fixed Settings result with no-store and no-referrer policies.
+
+The provider uses S256 PKCE and `offline_access`; the client secret remains server-side. [GitHub App user authorization](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app) defines this exchange. Stored access and refresh tokens use AES-256-GCM, with an HKDF-derived key from the ignored local API server secret and authenticated user/workspace-generation/purpose binding. The encrypted database and its key are on the same trusted machine: this is local server-secret encryption, not Windows Credential Manager or a production credential vault. Rotating or losing that server secret requires reconnecting GitHub.
+
+Near expiry, refresh is serialized within one API process and saved with a connection-revision compare-and-swap. A refresh replaces the token pair; [GitHub refresh semantics](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens) make old credentials unusable. This local design does not claim coordination across multiple API hosts. GitHub 401 authorization failures clear the current connection; 403/404 deny the operation, while rate limits and temporary provider failures preserve the credential for a later retry.
+
+**Disconnect** deletes local GitHub credentials and pending authorization attempts and fences in-flight imports/refreshes. It does not uninstall the App or revoke the grant on GitHub. For remote revocation, use GitHub **Settings → Applications → Authorized GitHub Apps → Revoke**; installation management is separate. [Reviewing and revoking authorization](https://docs.github.com/en/apps/using-github-apps/reviewing-and-revoking-authorization-of-github-apps).
+
+Disconnecting keeps previously imported local evidence available for recall. New remote calls recheck authorization. Webhook-driven revocation, background synchronization and hosted access reconciliation are pending; do not describe this local connection as immediate cross-device revocation or automatic deletion of retained history.
+
+## Bounded import and cited code recall
+
+An import captures up to 20 small supported text files, 256 KiB total, recent issue/pull-request metadata, the default branch and an available immutable commit SHA. Sensitive/generated paths are excluded, known secret patterns are redacted and partial results are reported. Import is a manual snapshot, not continuous synchronization or a complete copy of a large repository.
+
+In App mode the selected installation must belong to the configured App, be active and be accessible to the connected user. The selected repository's numeric ID and full name must still appear on the selected installation page both before and after fetch. The connection revision is checked again at the database save boundary, alongside repository/workspace generation fences.
+
+Ask can retrieve imported identifiers, filenames, paths and code phrases alongside command history. Code is labeled as an imported snapshot, not a recorded fix or executed check. Explicit recent-investigation requests remain command-only. Optional per-event AI enrichment receives execution evidence; adding code retrieval does not widen those provider inputs.
+
+File citations contain an immutable source ID, repository/path, redacted-content hash, available commit SHA and bounded line range. Lines refer to the stored redacted snapshot and may differ from GitHub's original file after secret removal. Unknown commits stay unknown. Reimport changes the current searchable snapshot without rewriting old cited versions; historical source IDs remain readable while their parent scope is active and are marked noncurrent. A path omitted from a partial import is not proven deleted remotely.
+
+Identical versions can reuse IDs, and `importedAt` records first observation. Retained file history is capped per repository at 32 MiB of text or 2,000 versions; a new import exceeding either cap is rejected rather than evicting cited evidence. Repository/workspace deletion blocks current and historical reads, removes search entries and prevents stale work from restoring the deleted scope.
+
+Read paths are `POST /v1/repository-sources/search` and `GET /v1/repository-sources/:id?startLine=1&limit=100`. Ask and read-only MCP tools share the same scoped API. Provider credentials and vector search are not prerequisites for this lexical retrieval. A search miss is not proof that the full remote codebase lacks a symbol or behavior.

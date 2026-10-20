@@ -207,7 +207,7 @@ export function buildApp(options: AppOptions = {}) {
       },
       configuration: {
         github:
-          'Local GitHub import requires an authenticated GitHub CLI; hosted OAuth is separate.',
+          'Explicit imports use a configured private GitHub App connection or existing local GitHub CLI access. Connection status is shown separately.',
         ai: options.enricher
           ? 'A summary provider is configured; failed jobs remain visible.'
           : 'Not configured; deterministic observed summaries are available.',

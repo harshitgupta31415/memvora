@@ -169,9 +169,11 @@ After building and starting the app, run `npm run acceptance:history` to verify 
 
 ## 7. Optional GitHub context
 
-Use your existing `gh auth login` identity. The repository page can browse accessible repositories and explicitly import a bounded snapshot: up to 20 supported small text files, 256 KiB total, recent issue/PR metadata and commit provenance. Large repositories are intentionally partial. Import does not run repository code.
+With no App settings, use your existing `gh auth login` identity. A complete private GitHub App configuration enables browser connection from Settings and Repositories, followed by authorized installation and repository selection. App mode never falls back to the CLI's broader access after a failure. The repository page explicitly imports a bounded snapshot: up to 20 supported small text files, 256 KiB total, recent issue/PR metadata and commit provenance. Large repositories are intentionally partial. Import does not run repository code.
 
-This manual local bridge is not continuous GitHub App synchronization or production installation authorization. A private App manifest is drafted, but callback, installation and webhook flows require their own implementation/owner setup. See [GITHUB_SETUP.md](GITHUB_SETUP.md). Do not paste a GitHub token into the website.
+The local App flow implements state/browser binding, S256 PKCE, server-side token encryption, refresh, numeric account pinning and current user/installation repository checks. Owner registration and credentials are needed for a live connection; [GITHUB_SETUP.md](GITHUB_SETUP.md) gives the exact private App settings. Local disconnect removes credentials and pending flows while retaining imported history. It does not uninstall the App or revoke the GitHub grant. Hosted browser/device authentication, durable webhooks and continuous synchronization remain separate work. Do not paste a GitHub token into the website.
+
+After building, `npm run acceptance:github-oauth` launches a separate compiled website and an isolated in-memory API with an explicitly injected fixture provider. It checks the actual BFF start/callback cookie flow, PKCE, missing-browser and replay rejection, denial, protected installation selection, import/source recall and local disconnect. It uses no live GitHub authorization or user evidence and records `.memvora/oauth-acceptance.json`. Windows and Linux CI run this check after the build.
 
 ### Search and cite imported code
 

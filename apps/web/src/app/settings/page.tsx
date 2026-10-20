@@ -1,8 +1,9 @@
-import { MeSchema, SettingsSchema } from '@memvora/contracts';
+import { GitHubStatusSchema, MeSchema, SettingsSchema } from '@memvora/contracts';
 import { apiRequest } from '@/lib/api';
 import { Icon } from '@/components/icon';
 import { ErrorState, PageHeading } from '@/components/ui';
 import { CopyCommand, RefreshButton } from '@/components/controls';
+import { GitHubConnection } from '@/components/github-connection';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,10 +13,22 @@ function bytes(value: number) {
     : `${Math.round(value / 1024)} KiB`;
 }
 
-export default async function Settings() {
-  const [settings, me] = await Promise.all([
+export default async function Settings({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const parameters = await searchParams;
+  const outcome =
+    parameters.github === 'connected' ||
+    parameters.github === 'denied' ||
+    parameters.github === 'failed'
+      ? parameters.github
+      : undefined;
+  const [settings, me, github] = await Promise.all([
     apiRequest('/v1/settings', SettingsSchema),
     apiRequest('/v1/me', MeSchema),
+    apiRequest('/v1/github/status', GitHubStatusSchema),
   ]);
   return (
     <>
@@ -25,10 +38,15 @@ export default async function Settings() {
         description="Understand how this workspace stores evidence, processes memories, and connects to other tools."
         action={<RefreshButton />}
       />
+      {github.ok ? (
+        <GitHubConnection status={github.data} {...(outcome ? { outcome } : {})} />
+      ) : (
+        <ErrorState message={`GitHub connection status is unavailable. ${github.message}`} />
+      )}
       {!settings.ok ? (
         <ErrorState message={settings.message} />
       ) : (
-        <div className="settings-grid">
+        <div className="settings-grid section-top">
           <section className="panel settings-panel">
             <h2>
               <Icon name="grid" size={17} />

@@ -25,9 +25,17 @@ import type {
   SessionEventsQuery,
 } from '@memvora/contracts';
 import { DomainError, newId, redactText } from '@memvora/core';
-import type { AcceptedEvent, EnrichmentJob, LocalEvidenceStore } from '@memvora/core';
+import type {
+  AcceptedEvent,
+  EnrichmentJob,
+  GitHubConnectionRecord,
+  GitHubOAuthAttempt,
+  LocalEvidenceStore,
+} from '@memvora/core';
+import { GitHubConnections } from './github-connections.js';
 import {
   localFtsMigrationSql,
+  localGitHubConnectionMigrationSql,
   localRepositorySourcesMigrationSql,
   localRetryMigrationSql,
   localSessionHistoryMigrationSql,
@@ -115,6 +123,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   readonly path: string;
   private readonly database: DatabaseSync;
   private readonly historyCursorSecret: Buffer;
+  private readonly githubConnections: GitHubConnections;
   private closed = false;
 
   constructor(path: string) {
@@ -122,7 +131,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     if (this.path !== ':memory:') mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     this.database = new DatabaseSync(this.path, { timeout: 5_000 });
     const version = this.one('PRAGMA user_version');
-    if (version && integer(version, 'user_version') > 5) {
+    if (version && integer(version, 'user_version') > 6) {
       this.database.close();
       throw new Error('Local database schema is newer than this application.');
     }
@@ -130,7 +139,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     this.transaction(() => {
       // Re-read after BEGIN IMMEDIATE: another process may have migrated while this one waited.
       const currentVersion = integer(this.one('PRAGMA user_version') ?? {}, 'user_version');
-      if (currentVersion > 5)
+      if (currentVersion > 6)
         throw new Error('Local database schema is newer than this application.');
       if (currentVersion < 2) {
         this.database.exec(localFtsMigrationSql);
@@ -148,6 +157,10 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
           randomBytes(32).toString('hex'),
         );
         this.database.exec('PRAGMA user_version=5');
+      }
+      if (currentVersion < 6) {
+        this.database.exec(localGitHubConnectionMigrationSql);
+        this.database.exec('PRAGMA user_version=6');
       }
     });
     this.transaction(() => {
@@ -175,6 +188,11 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
       throw new Error('The persisted history cursor key is missing or invalid.');
     }
     this.historyCursorSecret = Buffer.from(string(historySecret, 'cursor_secret'), 'hex');
+    this.githubConnections = new GitHubConnections({
+      database: this.database,
+      transaction: (action) => this.transaction(action),
+      requireContext: (context) => this.requireContext(context),
+    });
   }
 
   private one(sql: string, ...values: SQLInputValue[]): Row | undefined {
@@ -295,6 +313,37 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
       },
     };
   }
+  githubConnectionRevision(context: LocalContext): number {
+    return this.githubConnections.revision(context);
+  }
+  beginGitHubOAuth(
+    context: LocalContext,
+    input: Omit<GitHubOAuthAttempt, 'expectedRevision'>,
+  ): GitHubOAuthAttempt {
+    return this.githubConnections.begin(context, input);
+  }
+  consumeGitHubOAuth(
+    context: LocalContext,
+    stateHash: string,
+    browserHash: string,
+    configHash: string,
+    now: number,
+  ): GitHubOAuthAttempt {
+    return this.githubConnections.consume(context, stateHash, browserHash, configHash, now);
+  }
+  getGitHubConnection(context: LocalContext): GitHubConnectionRecord | null {
+    return this.githubConnections.get(context);
+  }
+  saveGitHubConnection(
+    context: LocalContext,
+    input: Omit<GitHubConnectionRecord, 'revision' | 'updatedAt'>,
+    expectedRevision: number,
+  ): GitHubConnectionRecord {
+    return this.githubConnections.save(context, input, expectedRevision);
+  }
+  disconnectGitHub(context: LocalContext, expectedRevision?: number): void {
+    this.githubConnections.disconnect(context, expectedRevision);
+  }
   repositories(context: LocalContext): Repository[] {
     this.requireContext(context);
     return this.rows(
@@ -347,6 +396,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     id: string,
     value: RepositoryContext,
     expectedRepositoryGeneration?: number,
+    expectedGitHubRevision?: number,
   ): void {
     this.transaction(() => {
       const repository = this.repositoryRow(context, id);
@@ -355,6 +405,23 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
         expectedRepositoryGeneration !== integer(repository, 'generation')
       )
         throw notFound();
+      if (
+        expectedGitHubRevision !== undefined &&
+        (!Number.isSafeInteger(expectedGitHubRevision) ||
+          expectedGitHubRevision < 0 ||
+          !this.one(
+            'SELECT workspace_id FROM local_github_connections WHERE workspace_id=? AND user_id=? AND workspace_generation=? AND revision=? AND encrypted_tokens IS NOT NULL',
+            context.workspace.id,
+            context.user.id,
+            context.workspace.generation,
+            expectedGitHubRevision,
+          ))
+      )
+        throw new DomainError(
+          'GITHUB_CONNECTION_CHANGED',
+          'The GitHub connection changed. Start the import again.',
+          409,
+        );
       const json = JSON.stringify(value, (_key, item: unknown) =>
         typeof item === 'string' ? redactText(item) : item,
       );
@@ -1187,6 +1254,11 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   deleteWorkspace(context: LocalContext): void {
     this.transaction(() => {
       this.requireContext(context);
+      this.run(
+        'DELETE FROM local_github_oauth_attempts WHERE workspace_id=?',
+        context.workspace.id,
+      );
+      this.run('DELETE FROM local_github_connections WHERE workspace_id=?', context.workspace.id);
       this.run(
         "UPDATE local_workspaces SET generation=generation+1,status='deleted' WHERE id=?",
         context.workspace.id,

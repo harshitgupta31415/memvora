@@ -2212,6 +2212,150 @@ code {
     font-size: 13px;
   }
 }
+.github-connection .section-heading {
+  align-items: flex-start;
+  gap: 18px;
+}
+.connection-state {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 9px;
+  font-size: 8px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.connection-state-ready {
+  border-color: #3e5036;
+  background: #9eae790c;
+  color: var(--accent);
+}
+.github-connection-body {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 26px;
+}
+.github-connection-copy {
+  min-width: 0;
+  max-width: 720px;
+}
+.github-connection-copy h3 {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 3px 0 10px;
+  overflow-wrap: anywhere;
+}
+.github-connection-copy > p {
+  font-size: 10px;
+  line-height: 1.9;
+  color: var(--subtle);
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+.github-connection-actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  max-width: 290px;
+}
+.github-connection-actions form {
+  margin: 0;
+}
+.github-disconnect-note {
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  margin: 20px 0 0;
+  font-size: 9px;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.github-callback-address {
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+.github-callback-address .mono {
+  display: block;
+  margin-top: 4px;
+  color: var(--subtle);
+}
+.github-connection .notice {
+  margin-top: 0;
+  margin-bottom: 22px;
+}
+.github-connection .notice > p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.github-connection .success-text {
+  font-size: 10px;
+  line-height: 1.8;
+  color: var(--accent);
+  margin: 0 0 20px;
+}
+.github-installation-picker {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 13px;
+}
+.github-installation-picker label {
+  display: block;
+  min-width: 260px;
+  max-width: 100%;
+  flex: 1;
+}
+.github-installation-picker label > span {
+  display: block;
+  font-size: 9px;
+  color: var(--muted);
+  margin-bottom: 7px;
+}
+.github-installation-picker .select {
+  width: 100%;
+  font-size: 11px;
+}
+.github-installation-picker > .settings-help {
+  flex-basis: 100%;
+  margin: 0;
+}
+@media (max-width: 1020px) {
+  .github-connection-body {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .github-connection-actions {
+    justify-content: flex-start;
+    max-width: 100%;
+  }
+}
+@media (max-width: 720px) {
+  .github-connection .section-heading {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .github-connection-actions {
+    width: 100%;
+  }
+  .github-connection-actions form,
+  .github-connection-actions form .button {
+    width: 100%;
+  }
+  .github-connection-actions > .button {
+    width: 100%;
+  }
+  .github-installation-picker label {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+  .github-installation-picker > .button {
+    width: 100%;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

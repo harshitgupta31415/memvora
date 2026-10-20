@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { isUtf8 } from 'node:buffer';
 import { promisify } from 'node:util';
-import { redactText } from '@memvora/core';
+import { DomainError, redactText } from '@memvora/core';
 
 const execute = promisify(execFile);
 const ghExecutable = process.env['MEMVORA_GH_EXECUTABLE'] ?? 'gh';
@@ -136,6 +136,8 @@ export function redactRepositoryText(text: string): string {
 
 export async function importGitHubContext(
   fullName: string,
+  request: typeof githubRequest = githubRequest,
+  verifiedInstallationRepositoryId?: number,
 ): Promise<{ repository: GitHubRepository; context: GitHubContext; partial: boolean }> {
   if (!validateFullName(fullName)) throw new Error('Use a repository name in owner/name form.');
   const deadline = Date.now() + 45_000;
@@ -143,13 +145,24 @@ export async function importGitHubContext(
     const remaining = deadline - Date.now();
     if (remaining <= 0)
       throw new GitHubUnavailable('The bounded GitHub import reached its time limit.');
-    return githubRequest(path, Math.min(20_000, remaining));
+    return request(path, Math.min(20_000, remaining));
   };
   const raw = record(await read(`/repos/${fullName}`));
-  const permissions = record(raw['permissions']);
-  if (permissions['pull'] !== true)
-    throw new GitHubUnavailable('The current GitHub identity cannot read this repository.');
   const repo = repository(raw);
+  // App callers must first verify user/installation membership. Fine-grained metadata can omit permissions.
+  if (verifiedInstallationRepositoryId !== undefined) {
+    if (
+      !Number.isSafeInteger(verifiedInstallationRepositoryId) ||
+      repo.id !== verifiedInstallationRepositoryId
+    )
+      throw new DomainError(
+        'GITHUB_ACCESS_DENIED',
+        'GitHub returned a different repository identity.',
+        403,
+      );
+  } else if (record(raw['permissions'])['pull'] !== true) {
+    throw new GitHubUnavailable('The current GitHub identity cannot read this repository.');
+  }
   const context: GitHubContext = {
     provider: 'github',
     fullName,
@@ -167,7 +180,10 @@ export async function importGitHubContext(
       await read(`/repos/${fullName}/commits/${encodeURIComponent(repo.defaultBranch)}`),
     );
   } catch (error) {
-    if (error instanceof GitHubUnavailable && error.status === 409)
+    if (
+      (error instanceof GitHubUnavailable && error.status === 409) ||
+      (error instanceof DomainError && error.code === 'GITHUB_REPOSITORY_EMPTY')
+    )
       return { repository: repo, context, partial: false };
     throw error;
   }

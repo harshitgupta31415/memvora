@@ -173,3 +173,30 @@ CREATE TABLE IF NOT EXISTS local_history_state (
 INSERT INTO local_event_intakes(event_id)
   SELECT e.id FROM local_events e WHERE NOT EXISTS(SELECT 1 FROM local_event_intakes i WHERE i.event_id=e.id) ORDER BY e.rowid ASC;
 `;
+
+/** Version 6 keeps OAuth state and encrypted GitHub credentials on the local server. */
+export const localGitHubConnectionMigrationSql = `
+CREATE TABLE IF NOT EXISTS local_github_connections (
+  workspace_id TEXT PRIMARY KEY REFERENCES local_workspaces(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  workspace_generation INTEGER NOT NULL CHECK(workspace_generation >= 1),
+  revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+  github_user_id INTEGER,
+  github_user_json TEXT,
+  config_hash TEXT,
+  encrypted_tokens TEXT,
+  expires_at INTEGER,
+  updated_at TEXT
+) STRICT;
+CREATE TABLE IF NOT EXISTS local_github_oauth_attempts (
+  workspace_id TEXT PRIMARY KEY REFERENCES local_workspaces(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  workspace_generation INTEGER NOT NULL CHECK(workspace_generation >= 1),
+  state_hash TEXT NOT NULL UNIQUE,
+  browser_hash TEXT NOT NULL,
+  encrypted_verifier TEXT NOT NULL,
+  config_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0)
+) STRICT;
+`;

@@ -13,6 +13,7 @@ import {
 import { RepositoryForm } from '@/components/repository-form';
 import { RefreshButton } from '@/components/controls';
 import { GitHubBrowser } from '@/components/github-browser';
+import { GitHubConnection } from '@/components/github-connection';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +40,7 @@ export default async function Repositories() {
           </p>
         </div>
       </div>
+      {github.ok && <GitHubConnection status={github.data} />}
       {!result.ok ? (
         <ErrorState message={result.message} />
       ) : (
