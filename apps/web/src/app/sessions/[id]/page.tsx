@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import { Compile } from 'typebox/compile';
 import {
@@ -20,6 +21,7 @@ import {
 } from '@/components/ui';
 import { MemoryCard } from '@/components/evidence';
 import { CopyCommand } from '@/components/controls';
+import { InvestigationRecap, InvestigationRecapLoading } from '@/components/investigation-recap';
 
 export const dynamic = 'force-dynamic';
 
@@ -219,6 +221,9 @@ export default async function Investigation({
           {session.memoryCount} linked memor{session.memoryCount === 1 ? 'y' : 'ies'} overall
         </span>
       </div>
+      <Suspense fallback={<InvestigationRecapLoading />}>
+        <InvestigationRecap sessionId={session.id} />
+      </Suspense>
       <section
         className="timeline-snapshot panel section-top"
         aria-labelledby="timeline-snapshot-title"

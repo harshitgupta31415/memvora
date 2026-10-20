@@ -36,6 +36,7 @@
     "acceptance:local": "node scripts/acceptance-local.mjs",
     "acceptance:sources": "node scripts/acceptance-sources.mjs",
     "acceptance:history": "node scripts/acceptance-history.mjs",
+    "acceptance:recap": "node scripts/acceptance-recap.mjs",
     "acceptance:github-oauth": "node scripts/acceptance-github-oauth.mjs"
   },
   "devDependencies": {

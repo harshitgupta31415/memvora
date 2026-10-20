@@ -277,6 +277,49 @@ export const SessionContextSchema = object({
   memories: Type.Array(MemorySchema),
 });
 export type SessionContext = Type.Static<typeof SessionContextSchema>;
+export const SessionRecapSchema = object({
+  session: object({
+    ...SessionSchema.properties,
+    title: Type.String({ maxLength: 200 }),
+  }),
+  generatedAt: TimestampSchema,
+  mode: Type.Literal('observed'),
+  label: Type.String({ maxLength: 100 }),
+  summary: Type.String({ maxLength: 1000 }),
+  coverage: object({
+    totalEvents: Type.Integer({ minimum: 0 }),
+    includedEvents: Type.Integer({ minimum: 0, maximum: 40 }),
+    omittedEvents: Type.Integer({ minimum: 0 }),
+    eventLimit: Type.Literal(40),
+    selection: Type.Union([Type.Literal('all'), Type.Literal('first_and_last')]),
+  }),
+  counts: object({
+    passed: Type.Integer({ minimum: 0, maximum: 40 }),
+    failed: Type.Integer({ minimum: 0, maximum: 40 }),
+    interrupted: Type.Integer({ minimum: 0, maximum: 40 }),
+    spawnFailed: Type.Integer({ minimum: 0, maximum: 40 }),
+    incomplete: Type.Integer({ minimum: 0, maximum: 40 }),
+    withDiffs: Type.Integer({ minimum: 0, maximum: 40 }),
+    incompleteCapture: Type.Integer({ minimum: 0, maximum: 40 }),
+  }),
+  steps: Type.Array(
+    object({
+      sequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+      eventId: IdSchema,
+      command: Type.String({ maxLength: 300 }),
+      outcome: Type.String({ maxLength: 160 }),
+      outputExcerpt: Type.String({ maxLength: 600 }),
+      diffSummary: Type.String({ maxLength: 300 }),
+    }),
+    { maxItems: 40 },
+  ),
+  sources: Type.Array(
+    object({ ...CitationSchema.properties, locator: Type.String({ maxLength: 128 }) }),
+    { maxItems: 40 },
+  ),
+  uncertainty: Type.Array(Type.String({ maxLength: 500 }), { maxItems: 8 }),
+});
+export type SessionRecap = Type.Static<typeof SessionRecapSchema>;
 export const SessionEventsQuerySchema = object({
   cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),

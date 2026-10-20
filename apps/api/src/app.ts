@@ -30,6 +30,7 @@ import {
   SearchRequestSchema,
   SearchResponseSchema,
   SessionContextSchema,
+  SessionRecapSchema,
   SessionEventsPageSchema,
   SessionEventsQuerySchema,
   SessionListSchema,
@@ -40,6 +41,7 @@ import {
 import {
   captureLimits,
   DomainError,
+  deriveSessionRecap,
   getSystemStatus,
   LocalMemvora,
   observedLabel,
@@ -260,6 +262,18 @@ export function buildApp(options: AppOptions = {}) {
     },
     async (request) =>
       store.getSessionEvents(service.context(), request.params.id, { ...request.query }),
+  );
+  app.get(
+    '/v1/sessions/:id/recap',
+    {
+      schema: {
+        params: idParams,
+        querystring: Type.Object({}, { additionalProperties: false }),
+        response: { 200: SessionRecapSchema },
+      },
+    },
+    async (request) =>
+      deriveSessionRecap(store.getSessionRecapEvidence(service.context(), request.params.id)),
   );
   app.post(
     '/v1/sessions/:id/close',

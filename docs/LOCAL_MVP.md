@@ -17,6 +17,21 @@ The web server, CLI and MCP share runtime response contracts and the same local 
 
 Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. Lexical recall also searches the latest imported redacted code snapshot and returns immutable file citations. The optional provider path is separate and remains disabled unless explicitly configured.
 
+### Investigation recap
+
+Open an investigation to see a cited recap above its raw timeline. This computation works directly from accepted commands, including when enrichment is pending. It labels zero/nonzero exits, startup failures, interruptions, incomplete outcomes and diff/capture flags without inferring a fix or an engineer's intent. Each ordered step links to original evidence. Counts cover the included selection: all events through 40, otherwise first 20 and last 20 with explicit omitted-middle coverage. The full retained history remains available through timeline pagination. Refresh to include later uploads; the recap is computed on request rather than stored.
+
+The same recap is available through CLI and MCP:
+
+```powershell
+node apps/cli/dist/index.js session recap <session-id>
+node apps/cli/dist/index.js session recap <session-id> --json
+```
+
+With a bound local capture, omit the ID to read its current investigation. An explicit ID uses the shared local connection without requiring a capture binding in the current directory. MCP tool `get_session_recap` accepts `{ "id": "<session-id>" }`, returns cited observed steps and disclosed coverage, and never executes the recorded commands. This is a deterministic investigation recap; the optional AI adapter remains separate per-command enrichment.
+
+With the compiled app running and an existing investigation containing at least three commands, `npm run acceptance:recap` checks API, CLI and real MCP agreement against original event UUIDs. It inserts no evidence or answer and verifies the evidence/processing counts remain unchanged. The ignored report is `.memvora/recap-acceptance.json`.
+
 ## 2. Start development
 
 Prerequisites: Windows PowerShell, Node 24 or 26 and npm 11+. The Git executable adds commit/dirty/diff provenance. GitHub CLI is optional until importing GitHub context. No local AI model, GPU workload or external database is needed for capture and observed recall.

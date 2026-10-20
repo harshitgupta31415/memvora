@@ -23,6 +23,7 @@ import {
   type Binding,
 } from './local.js';
 import { captureCommand, gitText, recoverIncomplete } from './capture.js';
+import { formatSessionRecap, readSessionRecap } from './session-recap.js';
 
 const program = new Command()
   .name('memvora')
@@ -238,6 +239,19 @@ session
     if (!Check(SessionEventsPageSchema, result))
       throw new Error('Session response failed the shared runtime contract.');
     console.log(JSON.stringify(result, null, 2));
+  });
+
+session
+  .command('recap [id]')
+  .description('Read a cited observed recap of the investigation; no fix is inferred.')
+  .option('--json', 'Print the validated bounded recap as JSON')
+  .action(async (id: string | undefined, options: { json?: boolean }) => {
+    const binding = id ? undefined : bound().binding;
+    const sessionId = id ?? binding?.sessionId;
+    if (!Check(IdSchema, sessionId)) throw new Error('An authorized session UUID is required.');
+    const { origin, token } = connection(binding);
+    const result = await readSessionRecap(origin, token, sessionId);
+    console.log(options.json ? JSON.stringify(result, null, 2) : formatSessionRecap(result));
   });
 
 program

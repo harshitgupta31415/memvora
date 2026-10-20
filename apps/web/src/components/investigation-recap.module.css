@@ -1,0 +1,239 @@
+.recap {
+  padding: 23px 25px;
+  min-width: 0;
+}
+.recap h2 {
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.5;
+  margin: 0;
+}
+.heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 17px;
+}
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 8px;
+  line-height: 1.7;
+  letter-spacing: 1.4px;
+  color: var(--accent);
+}
+.label {
+  color: var(--accent);
+  border: 1px solid #3d4634;
+  border-radius: 4px;
+  padding: 6px 9px;
+  font-size: 9px;
+  line-height: 1.7;
+  max-width: 340px;
+  overflow-wrap: anywhere;
+}
+.summary {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-bottom: 17px;
+}
+.coverage {
+  border-left: 2px solid #566048;
+  padding-left: 13px;
+  margin-bottom: 20px;
+}
+.coverage p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.9;
+  margin: 0;
+}
+.coverage p:first-child {
+  color: var(--subtle);
+  margin-bottom: 3px;
+}
+.coverage strong {
+  color: var(--accent);
+  font-weight: 500;
+}
+.counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(115px, 1fr));
+  gap: 9px;
+  margin: 0 0 11px;
+}
+.counts > div {
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #121418;
+}
+.counts dt {
+  font-size: 8px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.counts dd {
+  margin: 5px 0 0;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+.caption,
+.freshness {
+  font-size: 9px;
+  line-height: 1.9;
+  color: var(--muted);
+  margin: 0;
+}
+.steps {
+  border-top: 1px solid var(--line);
+  margin-top: 20px;
+}
+.steps summary {
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.9;
+  padding: 16px 2px;
+  color: var(--subtle);
+}
+.steps summary::marker {
+  color: var(--accent);
+}
+.steps summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.steps summary > span {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  margin-left: 14px;
+}
+.steps ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.steps li {
+  display: grid;
+  grid-template-columns: 35px minmax(0, 1fr);
+  gap: 13px;
+  border-top: 1px solid var(--line);
+  padding: 18px 0;
+}
+.sequence {
+  color: var(--muted);
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 9px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+.stepBody {
+  min-width: 0;
+}
+.command {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+.command:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.outcome,
+.diff {
+  font-size: 10px;
+  color: var(--subtle);
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  margin: 7px 0 10px;
+}
+.diff strong {
+  font-weight: 500;
+  color: var(--muted);
+}
+.output {
+  font-size: 10px;
+  line-height: 1.8;
+  color: var(--muted);
+  background: #111317;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 11px 13px;
+  max-height: 180px;
+  overflow: auto;
+  margin: 9px 0 12px;
+}
+.output:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.uncertainty {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.uncertainty h3,
+.empty h3 {
+  font-size: 11px;
+  line-height: 1.8;
+  font-weight: 500;
+  margin: 0 0 7px;
+}
+.uncertainty ul {
+  padding-left: 17px;
+  margin: 0;
+}
+.uncertainty li,
+.empty p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+  margin: 0 0 5px;
+}
+.empty {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.freshness {
+  margin-top: 16px;
+}
+.error {
+  color: var(--red);
+  font-size: 11px;
+  line-height: 1.9;
+  margin: 13px 0 7px;
+}
+@media (max-width: 720px) {
+  .recap {
+    padding: 20px;
+  }
+  .heading {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .label {
+    max-width: 100%;
+  }
+  .recap h2 {
+    font-size: 16px;
+  }
+  .summary {
+    font-size: 11px;
+  }
+  .counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .steps li {
+    grid-template-columns: 27px minmax(0, 1fr);
+    gap: 9px;
+  }
+}

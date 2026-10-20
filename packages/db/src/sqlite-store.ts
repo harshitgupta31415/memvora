@@ -31,6 +31,7 @@ import type {
   GitHubConnectionRecord,
   GitHubOAuthAttempt,
   LocalEvidenceStore,
+  SessionRecapEvidence,
 } from '@memvora/core';
 import { GitHubConnections } from './github-connections.js';
 import {
@@ -724,6 +725,31 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
       id,
     ).map((row) => parse<Memory>(row['summary_json']));
     return { session, events, memories };
+  }
+  getSessionRecapEvidence(context: LocalContext, id: string): SessionRecapEvidence {
+    return this.transaction(() => {
+      const session = this.sessionDto(this.sessionRow(context, id));
+      const totalEventCount = session.eventCount;
+      const rows =
+        totalEventCount <= 40
+          ? this.rows(
+              'SELECT payload_json,sequence FROM local_events WHERE workspace_id=? AND session_id=? ORDER BY sequence ASC LIMIT 40',
+              context.workspace.id,
+              id,
+            )
+          : this.rows(
+              'SELECT payload_json,sequence FROM (SELECT payload_json,sequence FROM local_events WHERE workspace_id=? AND session_id=? ORDER BY sequence ASC LIMIT 20) UNION SELECT payload_json,sequence FROM (SELECT payload_json,sequence FROM local_events WHERE workspace_id=? AND session_id=? ORDER BY sequence DESC LIMIT 20) ORDER BY sequence ASC',
+              context.workspace.id,
+              id,
+              context.workspace.id,
+              id,
+            );
+      return {
+        session,
+        events: rows.map((row) => parse<CapturedEvent>(row['payload_json'])),
+        totalEventCount,
+      };
+    }, 'read');
   }
   private encodeHistoryCursor(value: HistoryCursor): string {
     const body = Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');

@@ -46,6 +46,11 @@ export class DomainError extends Error {
 }
 
 export type AcceptedEvent = { event: CapturedEvent; digest: string };
+export type SessionRecapEvidence = {
+  session: Session;
+  events: CapturedEvent[];
+  totalEventCount: number;
+};
 export type EnrichmentJob = {
   id: string;
   leaseToken: string;
@@ -80,6 +85,7 @@ export interface LocalEvidenceStore extends GitHubConnectionStore {
   sessions(context: LocalContext, repositoryId?: string, limit?: number): Session[];
   createSession(context: LocalContext, input: CreateSession): Session;
   getSession(context: LocalContext, id: string): SessionContext;
+  getSessionRecapEvidence(context: LocalContext, id: string): SessionRecapEvidence;
   getSessionEvents(
     context: LocalContext,
     id: string,

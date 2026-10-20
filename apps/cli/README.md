@@ -19,6 +19,8 @@ memvora session start "Investigate startup failure"
 memvora session show
 memvora session show <authorized-session-uuid> --limit 5
 memvora session show <authorized-session-uuid> --limit 5 --cursor <older-or-newer-cursor>
+memvora session recap
+memvora session recap <authorized-session-uuid> --json
 memvora session end
 ```
 
@@ -37,5 +39,7 @@ Initial conservative limits: 128 KiB persisted output per invocation, 32 KiB per
 Suppressed overlong-line bytes count toward truncation and make capture incomplete. Output truncation and externally signaled termination are also explicitly incomplete; a signaled process is recorded as interrupted rather than as a successful completion.
 
 `session show` prints a validated JSON page containing original events, their linked memories and navigation cursors. With an explicit session UUID it uses the explicit/environment/default API connection independently of folder bindings; without one it uses the current bound session. The default page contains the latest 20 events in chronological order; limits from 1 to 50 are accepted. Follow `page.olderCursor` or `page.newerCursor` with the same limit to inspect a fixed intake snapshot, including histories longer than 100 commands. Omit the cursor to refresh membership. Summaries and current session counts can change as workers finish or new evidence arrives. Cursors remain valid across a server restart but never grant access to deleted or unavailable evidence.
+
+`session recap [id]` reads `GET /v1/sessions/:id/recap` through that same protected API and uses the same explicit-ID versus current-binding connection rule as `session show`. It prints a deterministic observed recap: chronological command/outcome citations, bounded output/diff excerpts, coverage, counts and uncertainty. The recap includes all accepted events up to 40; longer investigations include the first 20 and last 20 and explicitly disclose omitted middle events. Counts describe only those included events. Human output further shortens output/diff text and removes terminal controls; `--json` prints the complete runtime-validated bounded recap without raw event payloads. Use `session show` for the remaining retained evidence. A passing command, a nearby diff and session closure do not establish a causal fix.
 
 `ask` prints the API's observed-evidence label, historical steps, source IDs and uncertainty. It does not invent an AI summary or run a recommended fix. Child failure status is preserved where representable. This local CLI is private and has not been published as an npm package.

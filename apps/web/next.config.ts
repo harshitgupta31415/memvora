@@ -8,7 +8,8 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: { '/*': ['../../.memvora/**/*', '../../.env', '../../.env.*'] },
   turbopack: {
     root: workspaceRoot,
-    rules: { '*.css': { loaders: ['@tailwindcss/turbopack'], as: '*.css' } },
+    // Restrict this loader to the Tailwind entry so CSS Modules keep Next.js's built-in processor.
+    rules: { 'globals.css': { loaders: ['@tailwindcss/turbopack'], as: '*.css' } },
   },
 };
 
