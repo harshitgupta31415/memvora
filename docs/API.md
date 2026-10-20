@@ -1,0 +1,171 @@
+# HTTP, CLI and MCP contracts
+
+This document retains the original **hosted-target contract plan**. It is not the current implementation inventory: later sections include planned browser/device authentication, PostgreSQL-oriented behavior and historical starter wording. Use [LOCAL_MVP.md](LOCAL_MVP.md) for the actual local implementation and `packages/contracts/src/local.ts` for its schemas.
+
+The local code now includes SQLite-backed evidence intake, repository/session routes, observed memories, cited ask, a real command wrapper and three MCP retrieval tools. It uses a trusted-machine loopback credential, not the hosted login/pairing system described below. GitHub browsing/import uses an explicit local `gh` bridge; AI is optional and disabled by default. Integration and acceptance results remain separately recorded. Shared runtime validation continues through `packages/contracts`.
+
+## HTTP conventions
+
+- JSON requests/responses except raw GitHub webhooks. UTF-8, UTC ISO-8601 timestamps and UUID domain identifiers.
+- Protected CLI/MCP routes use `Authorization: Bearer <credential>`; browser routes use validated web sessions. Credentials never appear in URLs, logs or repository files.
+- Every protected route resolves a stable principal and workspace, then current repository grants. Client IDs select resources but do not grant access.
+- API paths use `/v1`; breaking semantic/schema changes require a new version or an explicit compatibility window.
+- Enforce request limits before parsing; validate unknown fields and response schemas at boundaries. One `requestId` connects safe logs and client errors.
+- Pagination uses opaque keyset cursors. Default timeline page size 50; maximum 100. Do not expose arbitrary SQL filters.
+
+Error envelope:
+
+```json
+{
+  "error": {
+    "code": "REPOSITORY_ACCESS_DENIED",
+    "message": "This repository is not available to the current credential.",
+    "requestId": "example-request-id",
+    "retryable": false
+  }
+}
+```
+
+Use 400 for malformed schema, 401 for unauthenticated/expired credential, 403 for a known forbidden operation, 404 for inaccessible object detail where enumeration must be avoided, 409 for immutable ID conflict, 413 for request limits, 429 for throttling, 503 for temporary unavailability. Use one consistent resource-enumeration policy. Returning an empty search set must not reveal names or counts from forbidden repositories.
+
+## Route inventory
+
+| Method and route                     | Purpose                                             | Authentication / notes                                                    |
+| ------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------- |
+| `GET /health`                        | Process liveness                                    | No secrets; does not prove every dependency is ready.                     |
+| `GET /v1/system/status`              | Starter capabilities and planned integration status | Implemented scaffold route; no connected-product completion claim.        |
+| `GET /ready`                         | Dependency readiness                                | Restricted diagnostics; provider outage need not block capture readiness. |
+| `GET /v1/auth/github/start`          | Begin browser sign-in                               | CSRF state and approved callback handling.                                |
+| `GET /v1/auth/github/callback`       | Resolve identity and web session                    | Verify callback/state; never accept arbitrary redirect destinations.      |
+| `POST /v1/auth/logout`               | Revoke browser session                              | Session + CSRF.                                                           |
+| `POST /v1/device/pairings`           | Allocate user/device codes                          | Public but strongly rate limited.                                         |
+| `POST /v1/device/pairings/approve`   | Approve user code                                   | Browser session + CSRF; show requested device/scopes.                     |
+| `POST /v1/device/pairings/token`     | Poll with secret device code                        | Single consumption, expiry and interval enforcement.                      |
+| `GET /v1/me`                         | Stable user/workspace context                       | No raw credentials.                                                       |
+| `GET /v1/repositories`               | Current allowed repositories and sync state         | Paginated scoped projection.                                              |
+| `POST /v1/github/installations/link` | Verify and bind installation                        | Browser owner and verified installation/user authority.                   |
+| `POST /v1/webhooks/github`           | Durable webhook intake                              | Raw-byte GitHub HMAC; unique delivery ID.                                 |
+| `POST /v1/repositories/:id/sync`     | Request bounded resync                              | Authorized repo, idempotent job key and rate limit.                       |
+| `POST /v1/sessions`                  | Create investigation session                        | Repo-scoped CLI write credential.                                         |
+| `POST /v1/sessions/:id/close`        | Mark capture grouping ended                         | Does not rewrite event facts or prove success.                            |
+| `GET /v1/sessions`                   | Timeline groups                                     | Repo filter, cursor, page limit.                                          |
+| `GET /v1/sessions/:id`               | Bounded context and processing state                | Reauthorize all linked sources.                                           |
+| `POST /v1/events/batch`              | Atomic finalized-event ingestion                    | Write scope, limits, immutable IDs and exact ACK.                         |
+| `GET /v1/events/:id`                 | Original redacted event and artifact locators       | Source scope recheck.                                                     |
+| `GET /v1/artifacts/:id`              | Bounded artifact detail                             | Range/page policy for larger output.                                      |
+| `POST /v1/memories/search`           | Ranked bounded sources                              | Read scope and current repository grants.                                 |
+| `GET /v1/memories/:id`               | Structured summary, provenance and sources          | No stale permission bypass.                                               |
+| `POST /v1/ask`                       | Answer using authorized evidence                    | Bounded provider input; insufficient-evidence response supported.         |
+| `POST /v1/memories/:id/retry`        | Retry failed enrichment                             | Authorized scope, idempotent version key, rate limit.                     |
+| `DELETE /v1/credentials/:id`         | Revoke paired device                                | Workspace owner/current authorized principal.                             |
+| `DELETE /v1/workspace`               | Begin guarded deletion                              | Explicit confirmation UI, fresh owner verification and CSRF for browser.  |
+
+## Pairing details
+
+The pairing design belongs to Memvora; it is not automatically supplied by GitHub App installation or an MCP SDK.
+
+Pairing request supplies a bounded `deviceName` and requested scopes. Response returns `userCode`, `deviceCode`, `verificationUri`, `expiresIn` and minimum poll `interval`. Initial defaults: 10-minute validity and 5-second polling, subject to rate-limit testing. Hash both codes at rest. The short displayed code is not a bearer credential.
+
+Signed-in browser approval binds the pairing to an authorized workspace. Polling sends the secret code in a JSON body, never a URL. Pending returns a documented pending state; too-fast polling increases backoff; denied/expired returns a terminal state; successful atomic consumption returns the raw credential once. Polling after consumption cannot obtain it again. CLI uses the credential store before reporting login success.
+
+## Event batch contract
+
+The following illustrates the target structure. Replace fixture values with actual capture; implement the shared schema before shipping. Workspace is resolved from the credential; a selector in the body cannot override it.
+
+```json
+{
+  "schemaVersion": 1,
+  "events": [
+    {
+      "eventId": "11111111-1111-4111-8111-111111111111",
+      "repositoryId": "22222222-2222-4222-8222-222222222222",
+      "sessionId": "33333333-3333-4333-8333-333333333333",
+      "sequence": 1,
+      "startedAt": "2026-10-21T09:00:00.000Z",
+      "endedAt": "2026-10-21T09:00:01.000Z",
+      "command": { "executable": "npm", "args": ["test"], "shell": "cmd.exe" },
+      "cwd": "repo-relative-or-redacted-location",
+      "git": { "commitSha": null, "dirty": true },
+      "outcome": { "kind": "completed", "exitCode": 1, "signal": null },
+      "capture": { "complete": true, "truncatedBytes": 0, "redacted": true },
+      "output": [{ "stream": "stderr", "ordinal": 0, "text": "fixture failure output" }],
+      "diffs": []
+    }
+  ]
+}
+```
+
+Contract decisions:
+
+- At most 50 events/2 MiB per uncompressed batch. Output/diff caps also apply per event. Finalized events only; streaming partial-event upload is not an MVP feature.
+- `outcome.kind` is `completed`, `spawn_failed`, `interrupted` or `incomplete`. Missing exit code is `null`, never automatically zero. Spawn error carries a safe error code/message through a discriminated schema.
+- `stdout` and `stderr` are distinct in wrapper mode. Future PTY records use an explicit `pty` merged stream, not fabricated separation.
+- Git SHA can be null for a repository with no commit. Record the reason when repository state cannot be read.
+- Canonical server digest excludes transport-only fields. Clients may send a digest for diagnostics, but the server computes and verifies its own representation.
+- First implementation uses an atomic batch. Invalid schema, unauthorized event or reused ID with different payload rejects the whole batch; no partial ACK.
+
+Successful response after commit:
+
+```json
+{
+  "acknowledgedEventIds": ["11111111-1111-4111-8111-111111111111"],
+  "requestId": "example-request-id"
+}
+```
+
+An identical resend returns the same acknowledged IDs without a duplicate execution/enrichment effect. An ambiguous network failure keeps all unacknowledged local IDs pending. The client never clears an entire live outbox based on a batch's success.
+
+## Search and ask
+
+Search input: `query` (nonempty bounded text), optional `repositoryIds`, `limit` (default 10/max 20), optional opaque cursor. Server intersects filters with current allowed repositories. Invalid/inaccessible explicit repo selectors follow the documented denial policy rather than widening the query.
+
+Search results contain memory/source ID, repository ID, title/excerpt, outcome, event time, commit conditions, processing state, and authorized source locators. Similarity scores are internal ranking signals; do not present them as calibrated factual confidence.
+
+Ask input adds an optional bounded `sessionId`. Response includes:
+
+```ts
+type RecallAnswer = {
+  status: 'answered' | 'insufficient_evidence';
+  answer: string;
+  steps: Array<{ text: string; sourceIds: string[] }>;
+  sources: Array<{
+    id: string;
+    kind: 'event' | 'artifact' | 'memory';
+    repositoryId: string;
+    locator: string;
+  }>;
+  uncertainty: string[];
+  requestId: string;
+};
+```
+
+A locator is an application source reference, not an arbitrary URL the model invents. Validate all cited IDs against the returned authorized bundle. Provider failure yields a truthful service error plus a way to access raw search results; it does not return a fabricated answer. No-source answers state insufficient evidence.
+
+## CLI product surface
+
+| Command                              | Target behavior                                                                         |
+| ------------------------------------ | --------------------------------------------------------------------------------------- |
+| `memvora login`                      | Browser approval and secure credential storage.                                         |
+| `memvora logout`                     | Revoke or remove local credential; preserve workspace history.                          |
+| `memvora init`                       | Resolve cwd/remote, choose authorized repo, save local binding.                         |
+| `memvora status`                     | Show API/repo binding, pending count, blocked state and capture limits without secrets. |
+| `memvora session start [title]`      | Begin explicit investigation grouping.                                                  |
+| `memvora session end`                | End grouping; no automatic success claim.                                               |
+| `memvora run -- <command> [args...]` | Capture supported explicit invocation and preserve child outcome.                       |
+| `memvora sync`                       | Resend pending immutable events with bounded retry.                                     |
+| `memvora ask <question>`             | Authorized cited recall in current repo; explicit repo override must be authorized.     |
+| `memvora config`                     | Inspect/edit safe configuration and exclusions. Never print raw credentials.            |
+
+Document which commands the starter actually implements. A placeholder should fail with a clear not-implemented message, never simulate successful capture, auth or synchronization.
+
+## MCP tools
+
+| Tool                  | Input                                   | Result                                                                 |
+| --------------------- | --------------------------------------- | ---------------------------------------------------------------------- |
+| `search_memory`       | query, optional repo IDs, bounded limit | Ranked memories/sources and safe locators.                             |
+| `get_memory`          | memory ID                               | Current permitted summary, uncertainty and source references.          |
+| `get_session_context` | session ID, optional cursor/limit       | Bounded ordered attempts, diffs/check references and unresolved state. |
+
+Local stdio adapter uses an existing scoped credential through the same API. Transport stdout is reserved for JSON-RPC/protocol messages; logs go to stderr. Mark tools read-only in supported metadata. Tool names do not imply authority to execute commands. Tests verify no unauthorized source appears in tool text, metadata, errors or logs.
+
+The current local adapter implements these three read tools through the authenticated API. `memvora_status` also calls the API for capability metadata. This local transport does not establish hosted authentication, installation-based repository grants, or production readiness. See [LOCAL_MVP.md](LOCAL_MVP.md) for executable setup and the actual bounded local contracts.

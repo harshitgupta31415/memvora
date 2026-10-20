@@ -1,0 +1,32 @@
+{
+  "name": "@memvora/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.4.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "@memvora/contracts": "*",
+    "server-only": "0.0.1",
+    "typebox": "1.4.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "10.13.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "typescript-eslint": "8.72.0",
+    "tailwindcss": "^4",
+    "typescript": "6.0.3"
+  },
+  "author": "harshitgupta31415"
+}

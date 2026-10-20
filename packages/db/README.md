@@ -1,0 +1,15 @@
+# Storage adapters
+
+The working local MVP uses `SqliteEvidenceStore` and Node's built-in `node:sqlite` API. The API explicitly creates `.memvora/server.sqlite` during bootstrap; imports do not open a database. The synchronous adapter is intended for bounded personal use on one machine. It is not a hosted multi-user database.
+
+`resolveDataDir()` uses absolute `MEMVORA_DATA_DIR` or the project root's `.memvora`. `loadLocalToken({create:true})` is called only by API startup, creates a random 32-byte credential when needed, and honors a validated `MEMVORA_LOCAL_TOKEN` override. Clients read the existing credential; they must not create another identity. Keep `.memvora` private and ignored by version control. A local plaintext database is not encrypted storage.
+
+Evidence and its pending enrichment job are written in one `BEGIN IMMEDIATE` transaction before exact UUID acknowledgement. Repeated IDs compare canonical payload digests. A changed payload or conflicting session sequence rejects the whole batch. Stored events are defensively redacted; retries compare the original payload digest without storing the original secret-bearing text.
+
+Each read and write applies the server-derived local workspace scope. Repository and session tombstones/generations fence deletion. Event deletion cascades to summaries and jobs; imported repository context is also removed for repository/workspace deletion. A delayed worker rechecks its lease and workspace/repository/session generations in the final-write transaction. Deleted workspace rows persist and never silently bootstrap a replacement.
+
+Lexical recall uses SQLite FTS5 with quoted literal query tokens, internal BM25 ranking, SQL scope predicates, and at most 20 returned memories. Insert/update/delete triggers maintain the index in the same transaction as memory changes. Schema version 2 backfills existing version-1 memories once; normal startup does not rescan them. FTS5 support is required; no silent table-scan fallback is used. This is lexical retrieval, not vector similarity or calibrated confidence. Session context returns the latest 100 recorded events and matching summaries in sequence order; counts still include all stored events.
+
+Recall expands a matching event through a separate scoped sequence-range query, so old errors retain their actual neighboring attempts even outside the latest timeline window. Expansion is bounded to three sequences on either side and ten returned event summaries. A small explicit set of recent-investigation prompts can recover the latest ten recorded events when lexical search has no match. This fallback respects repository selections (including an empty selection) and does not turn arbitrary unanswered queries into recent context. Pending summaries use labeled raw observations.
+
+The PostgreSQL `createDatabase()` factory and `schema.ts` remain a draft future adapter. No PostgreSQL migration has been generated or applied; its existence does not make the local pipeline PostgreSQL-ready. Move production deployment to reviewed relational ownership, migrations, hosted authentication, and the durable queue adapter as described in the architecture.

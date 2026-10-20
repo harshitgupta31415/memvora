@@ -1,0 +1,19 @@
+{
+  "name": "@memvora/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=../../.env --import tsx src/index.ts --check-config",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "check-config": "node --env-file-if-exists=../../.env dist/index.js --check-config"
+  },
+  "dependencies": {
+    "@memvora/enrichment": "*",
+    "@memvora/core": "*",
+    "@memvora/db": "*",
+    "pg-boss": "12.38.0"
+  }
+}
