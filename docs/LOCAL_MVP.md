@@ -44,6 +44,8 @@ Copy-Item .env.example .env
 
 Do not overwrite an existing local `.env`. Root scripts load it for API/CLI/worker. Next.js reads environment files from `apps/web`; when changing `MEMVORA_API_URL`, `MEMVORA_DATA_DIR` or an explicit local token, provide consistent values in the web server environment, such as ignored `apps/web/.env.local`. Never use a `NEXT_PUBLIC_` token variable.
 
+Direct `node` invocations and MCP hosts do not automatically load the root `.env`. With custom API/data-directory/credential overrides, pass the corresponding environment explicitly. `MEMVORA_DATA_DIR` must be an absolute path. The default commands below work without overrides.
+
 ## 3. Local identity and data
 
 The API creates `.memvora/local-token` and `.memvora/server.sqlite` under the project by default. `MEMVORA_DATA_DIR` overrides the server data directory. `MEMVORA_LOCAL_TOKEN` can override the credential; it must contain at least 32 characters. The web server reads it on the server side; CLI/MCP read it from the application root even when capturing another repository.
@@ -78,6 +80,14 @@ node $memvoraCli init
 node $memvoraCli session start "Investigate actual failure"
 node $memvoraCli run -- npm test
 ```
+
+If the API uses overrides from the root `.env`, include that file explicitly on each direct CLI invocation, for example:
+
+```powershell
+node --env-file-if-exists="C:\Users\victus\Desktop\hackathon\vips-cosmic\.env" $memvoraCli status
+```
+
+Use the same Node option for `init`, `run`, `sync`, session commands and `ask` when those overrides are required. Keep the environment file private.
 
 The current terminal cwd is the target of capture. Run the failing command, try a corrective code change, run a relevant check again, then end the investigation. Do not edit Memvora to insert the expected answer. Repeat with a second independent failure to test generality. A passing command alone does not prove the root cause or that a complete incident is resolved.
 
@@ -126,25 +136,30 @@ Known credential patterns, the local token, password/token arguments and private
 
 ## 6. Website routes
 
-| Route                | Purpose                                                                   |
-| -------------------- | ------------------------------------------------------------------------- |
-| `/`                  | Counts and recent recorded work in the local workspace.                   |
-| `/repositories`      | Explicit local registration plus optional GitHub browsing/import.         |
-| `/repositories/[id]` | Repository details, imported context and relevant sessions.               |
-| `/sessions`          | Investigation list.                                                       |
-| `/sessions/[id]`     | Captured attempts and generated/observed memories.                        |
-| `/events/[id]`       | Original command, outcome, output and tracked diffs.                      |
-| `/memories/[id]`     | Summary, mode, steps, uncertainty and source links.                       |
-| `/ask`               | Source-linked recall with repository filtering.                           |
-| `/settings`          | Actual local storage/enrichment settings and supported lifecycle actions. |
+| Route                | Purpose                                                                      |
+| -------------------- | ---------------------------------------------------------------------------- |
+| `/`                  | Counts and recent recorded work in the local workspace.                      |
+| `/repositories`      | Explicit local registration plus optional GitHub browsing/import.            |
+| `/repositories/[id]` | Repository details, imported context and relevant sessions.                  |
+| `/sessions`          | Investigation list.                                                          |
+| `/sessions/[id]`     | Captured attempts and generated/observed memories.                           |
+| `/events/[id]`       | Original command, outcome, output and tracked diffs.                         |
+| `/memories/[id]`     | Summary, mode, steps, uncertainty and source links.                          |
+| `/ask`               | Source-linked recall with repository filtering.                              |
+| `/jobs`              | Scoped processing states, attempt history and explicit failed-summary retry. |
+| `/settings`          | Actual local storage/enrichment settings, limits and connection diagnostics. |
 
-The first-run workspace is empty. Counts and memories reflect stored data, not showcase samples. Processing may briefly lag ingestion. A failed provider job must leave raw event detail available.
+The first-run workspace is empty. Counts and memories reflect stored data, not showcase samples. Processing may briefly lag ingestion. A failed provider job leaves raw event detail available. Open Memory processing to filter by repository, investigation or state. Failed summaries can be retried explicitly after fixing their configuration; running, queued and ready jobs cannot be reset. Each cycle has three automatic attempts, and manual retry counts remain visible. A retry uses the same accepted evidence and the current summary configuration, which can send it to a configured AI endpoint again.
+
+Deletion actions currently use the guarded local API; the settings screen has no deletion controls.
 
 ## 7. Optional GitHub context
 
 Use your existing `gh auth login` identity. The repository page can browse accessible repositories and explicitly import a bounded snapshot: up to 20 supported small text files, 256 KiB total, recent issue/PR metadata and commit provenance. Large repositories are intentionally partial. Import does not run repository code.
 
 This manual local bridge is not continuous GitHub App synchronization or production installation authorization. A private App manifest is drafted, but callback, installation and webhook flows require their own implementation/owner setup. See [GITHUB_SETUP.md](GITHUB_SETUP.md). Do not paste a GitHub token into the website.
+
+Imported source files and metadata can be inspected in repository detail. Ask searches captured-event memories, and enrichment receives execution evidence. Indexing imported files and supplying their context to recall/enrichment remains planned.
 
 ## 8. Optional HTTP AI
 
@@ -177,9 +192,11 @@ Build services, then configure the MCP host to launch direct Node with the absol
 
 Host configuration details vary by client. Available tools: `memvora_status`, `search_memory(query, repositoryIds?, limit?)`, `get_memory(id)` and `get_session_context(id, limit?)`. They use the API, retain source IDs and return bounded excerpts. Session tools report total event count separately from the latest-100-event window. No tool runs commands or edits code. Diagnostic output uses stderr. See [the adapter guide](../apps/mcp/README.md).
 
+For custom configuration, set `MEMVORA_API_URL` and the absolute `MEMVORA_DATA_DIR` in the MCP server environment. The adapter does not load the root `.env`. If the API uses an explicit `MEMVORA_LOCAL_TOKEN` override, provide that same value through the host's private environment/secret settings; never commit it in the JSON configuration.
+
 ## 10. Current local routes versus hosted target
 
-The current API implements `/health`, `/v1/system/status`, `/ready`, `/v1/me`, dashboard/settings, repository registration/list/detail, session creation/list/detail/close, event batch/detail, memory search/detail, ask and guarded local deletion actions. GitHub integration adds status, paginated repository browsing, explicit import and stored-context detail. Exact schemas are in `packages/contracts/src/local.ts`; route behavior is in `apps/api/src/app.ts` and `apps/api/src/integrations/github.ts`.
+The current API implements `/health`, `/v1/system/status`, `/ready`, `/v1/me`, dashboard/settings, repository registration/list/detail, session creation/list/detail/close, event batch/detail, memory search/detail, ask, scoped processing-job lists, failed-job retry and guarded local deletion actions. GitHub integration adds status, paginated repository browsing, explicit import and stored-context detail. Exact schemas are in `packages/contracts/src/local.ts`; route behavior is in `apps/api/src/app.ts` and `apps/api/src/integrations/github.ts`.
 
 Local protection uses the bearer credential, loopback checks, repository/workspace scope and deletion fences. It is not a substitute for hosted users, organization roles, GitHub App revocation synchronization or remote MCP authorization. Remaining hosted work includes PostgreSQL migration, pg-boss integration, pgvector retrieval, per-device credentials, browser sessions/CSRF design, OS credential storage, company ownership, operational retention and public deployment readiness. Keep those original acceptance gates in the PRD/roadmap.
 

@@ -4,7 +4,7 @@ Engineering memory that preserves recorded investigations and returns their supp
 
 Owner: **harshitgupta31415**. Team: Harshit Gupta (Leader), Himanshu Mittal, Gaurav Basnal, Yash Lalwani.
 
-This repository contains a **local MVP implementation**: a Next.js website, a loopback Fastify API, SQLite evidence storage, a Windows-first command wrapper, background memory processing and read-only MCP retrieval. It starts empty and uses actual captured/imported evidence. The hosted PostgreSQL architecture in the original PRD remains the longer-term target, with separate acceptance requirements.
+This repository contains a **local MVP implementation**: a Next.js website, a loopback Fastify API, SQLite evidence storage, a Windows-first command wrapper, background memory processing and read-only MCP retrieval. It starts empty. Recall and enrichment use captured execution evidence; imported GitHub snapshots currently support source inspection. Feeding those snapshots into retrieval and enrichment remains planned. The hosted PostgreSQL architecture in the original PRD remains the longer-term target, with separate acceptance requirements.
 
 Implementation status and verification are distinct. Do not infer that every PRD requirement, external provider or Windows command has passed acceptance because its code exists. The current checks and remaining gaps are tracked separately from the product plan.
 

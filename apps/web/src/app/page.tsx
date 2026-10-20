@@ -96,7 +96,10 @@ export default async function Overview() {
                   {dashboard.data.counts.failedJobs} enrichment job
                   {dashboard.data.counts.failedJobs === 1 ? '' : 's'} need attention
                 </strong>
-                <p>Original events remain available. Check the worker logs for retry details.</p>
+                <p>Original events remain available while summary processing needs attention.</p>
+                <Link href="/jobs?status=failed" className="inline-link">
+                  Review failed summaries <Icon name="arrow" size={12} />
+                </Link>
               </div>
             </div>
           )}
@@ -175,7 +178,10 @@ export default async function Overview() {
           <p className="muted-caption">
             {dashboard.data.counts.queuedJobs} background job
             {dashboard.data.counts.queuedJobs === 1 ? '' : 's'} queued · Counts reflect this local
-            workspace. Memories currently summarize recorded observations.
+            workspace. Memories currently summarize recorded observations.{' '}
+            <Link href="/jobs" className="inline-link">
+              View processing <Icon name="arrow" size={11} />
+            </Link>
           </p>
         </>
       )}

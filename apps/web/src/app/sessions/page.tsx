@@ -41,7 +41,7 @@ export default async function Investigations({
         action={<RefreshButton />}
       />
       <div className="toolbar">
-        <form method="get" className="filter-form">
+        <form key={`${filter.repositoryId}:${filter.query}`} method="get" className="filter-form">
           <div className="search-input">
             <Icon name="search" size={15} />
             <input

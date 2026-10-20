@@ -143,6 +143,11 @@ export default async function Investigation({ params }: { params: Promise<{ id: 
               title="Linked memory"
               description="Derived from recorded evidence. Original events remain authoritative."
             />
+            <p className="muted-caption">
+              <Link href={`/jobs?sessionId=${session.id}`} className="inline-link">
+                Check summary processing <Icon name="arrow" size={11} />
+              </Link>
+            </p>
             {memories.length ? (
               memories.map((memory) => <MemoryCard key={memory.id} memory={memory} />)
             ) : (

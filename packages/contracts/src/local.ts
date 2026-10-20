@@ -148,6 +148,46 @@ export const EventAckSchema = object({
 export type EventAck = Type.Static<typeof EventAckSchema>;
 export const EventResponseSchema = object({ event: EventSchema });
 
+export const JobStatusSchema = Type.Union([
+  Type.Literal('queued'),
+  Type.Literal('running'),
+  Type.Literal('ready'),
+  Type.Literal('failed'),
+]);
+export type JobStatus = Type.Static<typeof JobStatusSchema>;
+export const JobsQuerySchema = object({
+  repositoryId: Type.Optional(IdSchema),
+  sessionId: Type.Optional(IdSchema),
+  status: Type.Optional(JobStatusSchema),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+});
+export type JobsQuery = Type.Static<typeof JobsQuerySchema>;
+export const JobSummarySchema = object({
+  id: IdSchema,
+  eventId: IdSchema,
+  repositoryId: IdSchema,
+  sessionId: IdSchema,
+  status: JobStatusSchema,
+  attempts: Type.Integer({ minimum: 0 }),
+  maxAttempts: Type.Literal(3),
+  retryCount: Type.Integer({ minimum: 0 }),
+  createdAt: TimestampSchema,
+  availableAt: TimestampSchema,
+  leaseUntil: Type.Union([TimestampSchema, Type.Null()]),
+  lastError: Type.Union([
+    Type.Literal('ENRICHMENT_FAILED'),
+    Type.Literal('LEASE_ATTEMPTS_EXHAUSTED'),
+    Type.Null(),
+  ]),
+  canRetry: Type.Boolean(),
+});
+export type JobSummary = Type.Static<typeof JobSummarySchema>;
+export const EnrichmentJobSchema = JobSummarySchema;
+export type EnrichmentJobSummary = JobSummary;
+export const JobListSchema = object({ items: Type.Array(JobSummarySchema, { maxItems: 100 }) });
+export const JobResponseSchema = object({ job: JobSummarySchema });
+export const RetryJobSchema = object({});
+
 export const CitationSchema = object({
   id: IdSchema,
   kind: Type.Literal('event'),

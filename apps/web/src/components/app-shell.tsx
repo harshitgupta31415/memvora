@@ -9,6 +9,7 @@ const navigation: { href: string; label: string; icon: IconName }[] = [
   { href: '/', label: 'Overview', icon: 'grid' },
   { href: '/repositories', label: 'Repositories', icon: 'repo' },
   { href: '/sessions', label: 'Investigations', icon: 'terminal' },
+  { href: '/jobs', label: 'Memory processing', icon: 'clock' },
   { href: '/ask', label: 'Ask Memvora', icon: 'spark' },
 ];
 

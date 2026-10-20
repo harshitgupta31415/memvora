@@ -1688,7 +1688,51 @@ code {
   overflow: auto;
   padding-right: 5px;
 }
+.job-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.job-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+}
+.job-content {
+  flex: 1;
+  min-width: 0;
+}
+.job-heading,
+.job-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+}
+.job-repository {
+  font-size: 12px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  margin: 12px 0 8px;
+}
+.job-meta {
+  font-size: 10px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.job-error {
+  margin-bottom: 0;
+}
+.job-action {
+  max-width: 260px;
+}
 @media (max-width: 720px) {
+  .job-row {
+    flex-direction: column;
+    gap: 14px;
+  }
   .github-repo-row {
     gap: 9px;
   }

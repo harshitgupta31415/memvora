@@ -15,11 +15,15 @@ import {
   EventResponseSchema,
   HealthSchema,
   IdSchema,
+  JobListSchema,
+  JobResponseSchema,
+  JobsQuerySchema,
   MeSchema,
   MemoryResponseSchema,
   RecallAnswerSchema,
   RepositoryListSchema,
   RepositoryResponseSchema,
+  RetryJobSchema,
   SearchRequestSchema,
   SearchResponseSchema,
   SessionContextSchema,
@@ -275,6 +279,17 @@ export function buildApp(options: AppOptions = {}) {
     '/v1/ask',
     { schema: { body: AskRequestSchema, response: { 200: RecallAnswerSchema } } },
     async (request) => service.ask(request.body, request.id),
+  );
+  app.get(
+    '/v1/jobs',
+    { schema: { querystring: JobsQuerySchema, response: { 200: JobListSchema } } },
+    async (request) => ({ items: store.jobs(service.context(), request.query) }),
+  );
+  app.post(
+    '/v1/jobs/:id/retry',
+    { schema: { params: idParams, body: RetryJobSchema, response: { 202: JobResponseSchema } } },
+    async (request, reply) =>
+      reply.code(202).send({ job: store.retryJob(service.context(), request.params.id) }),
   );
   app.delete(
     '/v1/sessions/:id',

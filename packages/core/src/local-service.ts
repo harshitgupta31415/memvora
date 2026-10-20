@@ -5,6 +5,8 @@ import type {
   CreateRepository,
   CreateSession,
   Dashboard,
+  JobsQuery,
+  JobSummary,
   LocalContext,
   Memory,
   RecallAnswer,
@@ -64,6 +66,8 @@ export interface LocalEvidenceStore {
   ingest(context: LocalContext, events: AcceptedEvent[]): string[];
   search(context: LocalContext, input: SearchRequest, sessionId?: string): Memory[];
   getMemory(context: LocalContext, id: string): Memory;
+  jobs(context: LocalContext, query?: JobsQuery): JobSummary[];
+  retryJob(context: LocalContext, id: string): JobSummary;
   dashboard(context: LocalContext): Dashboard;
   deleteSession(context: LocalContext, id: string): void;
   deleteRepository(context: LocalContext, id: string): void;

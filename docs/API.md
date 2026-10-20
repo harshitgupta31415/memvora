@@ -4,6 +4,19 @@ This document retains the original **hosted-target contract plan**. It is not th
 
 The local code now includes SQLite-backed evidence intake, repository/session routes, observed memories, cited ask, a real command wrapper and three MCP retrieval tools. It uses a trusted-machine loopback credential, not the hosted login/pairing system described below. GitHub browsing/import uses an explicit local `gh` bridge; AI is optional and disabled by default. Integration and acceptance results remain separately recorded. Shared runtime validation continues through `packages/contracts`.
 
+## Implemented local job controls
+
+These routes are implemented for the local SQLite mode and require the same loopback Host/Origin checks and local bearer credential as evidence routes. They do not implement hosted account authorization.
+
+| Route                     | Implemented behavior                                                                                                                                                                                                                          |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/jobs`            | Return `{items: JobSummary[]}`, newest creation time then job ID first. Optional `repositoryId`, `sessionId`, `status` and `limit` filters; default 50 and maximum 100. Explicit inaccessible selectors return 404 and never widen the query. |
+| `POST /v1/jobs/:id/retry` | Strict JSON body `{}`. Only a terminal failed job in the current active workspace/repository/session generations can be rescheduled. Returns HTTP 202 with `{job}` in queued state.                                                           |
+
+`JobSummary` exposes `id`, `eventId`, `repositoryId`, `sessionId`, `status` (`queued`, `running`, `ready`, `failed`), current-budget `attempts`, `maxAttempts: 3`, cumulative manual `retryCount`, `createdAt`, `availableAt`, nullable `leaseUntil`, nullable safe `lastError`, and `canRetry`. Error values are only `ENRICHMENT_FAILED` or `LEASE_ATTEMPTS_EXHAUSTED`; there is no raw provider exception, credential or captured payload in this projection. The generic code does not diagnose a provider's exact failure cause.
+
+A retry preserves the same immutable event and job identity, resets the current three-attempt budget, increments manual retry history, clears the old lease and schedules work immediately in one transaction. Queued, running and ready jobs return 409 without changing their state or budget. A repeated retry request after a successful reschedule also returns 409, so a lost response should be followed by reading current job status. Deleted or stale-generation jobs return 404 and cannot be restored. An old worker's lease token cannot complete a subsequently retried job. Repeated failures still stop after three attempts and leave source evidence available.
+
 ## HTTP conventions
 
 - JSON requests/responses except raw GitHub webhooks. UTF-8, UTC ISO-8601 timestamps and UUID domain identifiers.

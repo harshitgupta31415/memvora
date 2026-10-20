@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS local_jobs (
   last_error TEXT
 ) STRICT;
 CREATE INDEX IF NOT EXISTS local_jobs_pending ON local_jobs(status, available_at);
+CREATE INDEX IF NOT EXISTS local_jobs_scope ON local_jobs(workspace_id,status,available_at);
 CREATE TABLE IF NOT EXISTS local_memories (
   id TEXT PRIMARY KEY,
   event_id TEXT NOT NULL UNIQUE REFERENCES local_events(id) ON DELETE CASCADE,
@@ -102,4 +103,10 @@ END;
 INSERT INTO local_memory_fts(memory_id,searchable_text)
   SELECT id,searchable_text FROM local_memories WHERE id NOT IN (SELECT memory_id FROM local_memory_fts);
 PRAGMA user_version = 2;
+`;
+
+/** Version 3 preserves explicit manual retry history separately from each attempt budget. */
+export const localRetryMigrationSql = `
+ALTER TABLE local_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count >= 0);
+PRAGMA user_version = 3;
 `;

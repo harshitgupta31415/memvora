@@ -1,5 +1,7 @@
 # Storage adapters
 
+Schema version 3 adds a persisted manual `retryCount` to enrichment jobs. Protected job listing exposes only scoped, generation-current status summaries and safe error codes. Explicit retries apply only to terminal failed jobs, reset the current three-attempt budget, preserve the same source event and job IDs, and clear the previous lease token. Active/completed/stale/deleted work cannot be reset. Lease tokens also fence completions from a worker that belonged to an earlier retry budget.
+
 The working local MVP uses `SqliteEvidenceStore` and Node's built-in `node:sqlite` API. The API explicitly creates `.memvora/server.sqlite` during bootstrap; imports do not open a database. The synchronous adapter is intended for bounded personal use on one machine. It is not a hosted multi-user database.
 
 `resolveDataDir()` uses absolute `MEMVORA_DATA_DIR` or the project root's `.memvora`. `loadLocalToken({create:true})` is called only by API startup, creates a random 32-byte credential when needed, and honors a validated `MEMVORA_LOCAL_TOKEN` override. Clients read the existing credential; they must not create another identity. Keep `.memvora` private and ignored by version control. A local plaintext database is not encrypted storage.

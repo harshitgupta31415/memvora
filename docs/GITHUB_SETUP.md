@@ -4,6 +4,8 @@ The local MVP can browse and explicitly import repositories using your existing 
 
 The repository page lists accessible repositories. Choose a repository to import a bounded snapshot: up to 20 small supported text files, 256 KiB total, recent issue/pull-request metadata, default branch and immutable commit SHA. The importer excludes sensitive/generated paths, applies known-pattern redaction, reports partial results, and stores snapshots under the repository's ownership. This is a manual local import, not continuous GitHub App synchronization. Large repositories are intentionally partial.
 
+Imported files and metadata are currently available for inspection in repository detail. Ask searches memories derived from captured execution events, and optional AI enrichment receives those events. Indexing imported repository files and adding them to recall/enrichment source bundles remains planned.
+
 If the CLI is unavailable, install the official GitHub CLI and sign in yourself. Restart the API after changing accounts. Do not paste a GitHub token into the website.
 
 ## OAuth and a private GitHub App

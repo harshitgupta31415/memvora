@@ -7,6 +7,8 @@ import type {
   CreateRepository,
   CreateSession,
   Dashboard,
+  JobsQuery,
+  JobSummary,
   LocalContext,
   Memory,
   Repository,
@@ -17,7 +19,7 @@ import type {
 } from '@memvora/contracts';
 import { DomainError, newId, redactText } from '@memvora/core';
 import type { AcceptedEvent, EnrichmentJob, LocalEvidenceStore } from '@memvora/core';
-import { localFtsMigrationSql, localSchemaSql } from './sqlite-schema.js';
+import { localFtsMigrationSql, localRetryMigrationSql, localSchemaSql } from './sqlite-schema.js';
 
 type Row = Record<string, SQLOutputValue>;
 const string = (row: Row, key: string): string => String(row[key]);
@@ -40,15 +42,21 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     if (this.path !== ':memory:') mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     this.database = new DatabaseSync(this.path, { timeout: 5_000 });
     const version = this.one('PRAGMA user_version');
-    if (version && integer(version, 'user_version') > 2) {
+    if (version && integer(version, 'user_version') > 3) {
       this.database.close();
       throw new Error('Local database schema is newer than this application.');
     }
     this.database.exec(localSchemaSql);
-    if (!version || integer(version, 'user_version') < 2)
-      this.transaction(() => {
+    this.transaction(() => {
+      // Re-read after BEGIN IMMEDIATE: another process may have migrated while this one waited.
+      const currentVersion = integer(this.one('PRAGMA user_version') ?? {}, 'user_version');
+      if (currentVersion > 3)
+        throw new Error('Local database schema is newer than this application.');
+      if (currentVersion < 2) {
         this.database.exec(localFtsMigrationSql);
-      });
+      }
+      if (currentVersion < 3) this.database.exec(localRetryMigrationSql);
+    });
     this.transaction(() => {
       if (!this.one('SELECT user_id FROM local_identity WHERE singleton=1')) {
         const userId = newId();
@@ -472,6 +480,76 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     const memory = parse<Memory>(row['summary_json']);
     for (const source of memory.sources) this.getEvent(context, source.id);
     return memory;
+  }
+  private jobRow(context: LocalContext, id: string): Row {
+    this.requireContext(context);
+    const row = this.one(
+      "SELECT j.*,e.received_at AS created_at FROM local_jobs j JOIN local_events e ON e.id=j.event_id JOIN local_sessions s ON s.id=j.session_id JOIN local_repositories r ON r.id=j.repository_id JOIN local_workspaces w ON w.id=j.workspace_id WHERE j.id=? AND j.workspace_id=? AND w.owner_user_id=? AND w.status='active' AND r.status='active' AND s.status!='deleted' AND w.generation=? AND j.workspace_generation=w.generation AND j.repository_generation=r.generation AND j.session_generation=s.generation",
+      id,
+      context.workspace.id,
+      context.user.id,
+      context.workspace.generation,
+    );
+    if (!row) throw notFound();
+    return row;
+  }
+  private jobDto(row: Row): JobSummary {
+    const status = string(row, 'status') as JobSummary['status'];
+    const rawError = nullable(row, 'last_error');
+    const lastError =
+      rawError === 'LEASE_ATTEMPTS_EXHAUSTED'
+        ? ('LEASE_ATTEMPTS_EXHAUSTED' as const)
+        : rawError
+          ? ('ENRICHMENT_FAILED' as const)
+          : null;
+    return {
+      id: string(row, 'id'),
+      eventId: string(row, 'event_id'),
+      repositoryId: string(row, 'repository_id'),
+      sessionId: string(row, 'session_id'),
+      status,
+      attempts: integer(row, 'attempts'),
+      maxAttempts: 3,
+      retryCount: integer(row, 'retry_count'),
+      createdAt: string(row, 'created_at'),
+      availableAt: string(row, 'available_at'),
+      leaseUntil: nullable(row, 'lease_until'),
+      lastError,
+      canRetry: status === 'failed',
+    };
+  }
+  jobs(context: LocalContext, query: JobsQuery = {}): JobSummary[] {
+    this.requireContext(context);
+    if (query.repositoryId) this.repositoryRow(context, query.repositoryId);
+    if (query.sessionId) this.sessionRow(context, query.sessionId);
+    const rows = this.rows(
+      `SELECT j.*,e.received_at AS created_at FROM local_jobs j JOIN local_events e ON e.id=j.event_id JOIN local_sessions s ON s.id=j.session_id JOIN local_repositories r ON r.id=j.repository_id JOIN local_workspaces w ON w.id=j.workspace_id WHERE j.workspace_id=? AND w.owner_user_id=? AND w.status='active' AND r.status='active' AND s.status!='deleted' AND w.generation=? AND j.workspace_generation=w.generation AND j.repository_generation=r.generation AND j.session_generation=s.generation${query.repositoryId ? ' AND j.repository_id=?' : ''}${query.sessionId ? ' AND j.session_id=?' : ''}${query.status ? ' AND j.status=?' : ''} ORDER BY e.received_at DESC,j.id DESC LIMIT ?`,
+      context.workspace.id,
+      context.user.id,
+      context.workspace.generation,
+      ...(query.repositoryId ? [query.repositoryId] : []),
+      ...(query.sessionId ? [query.sessionId] : []),
+      ...(query.status ? [query.status] : []),
+      Math.min(Math.max(query.limit ?? 50, 1), 100),
+    );
+    return rows.map((row) => this.jobDto(row));
+  }
+  retryJob(context: LocalContext, id: string): JobSummary {
+    return this.transaction(() => {
+      const row = this.jobRow(context, id);
+      if (row['status'] !== 'failed')
+        throw new DomainError(
+          'JOB_NOT_FAILED',
+          'Only a terminal failed job can be retried. Active or completed work was not reset.',
+          409,
+        );
+      this.run(
+        "UPDATE local_jobs SET status='queued',attempts=0,retry_count=retry_count+1,available_at=?,lease_until=NULL,lease_token=NULL,last_error=NULL WHERE id=? AND status='failed'",
+        now(),
+        id,
+      );
+      return this.jobDto(this.jobRow(context, id));
+    });
   }
   dashboard(context: LocalContext): Dashboard {
     this.requireContext(context);
