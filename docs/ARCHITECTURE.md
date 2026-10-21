@@ -26,18 +26,20 @@ The implemented local backup operator is a separate administrative boundary: `sc
 
 The CLI's offline outbox inspector is another explicitly local boundary: it opens only an existing capture outbox read-only and returns bounded metadata pages, without an API credential, bootstrap, migration or recovery. It exposes no browser/MCP filesystem interface. Selected sync filters stored rows before parsing, verifies the original envelope/row/bound-repository identities, and sends unchanged evidence through normal API authorization. Each attempt snapshots a row-ID cutoff, reports remaining work and acknowledges only unique IDs in the sent batch. Automatic upload after `run` targets that new event. Event-batch HTTP validation checks types without coercion so null outcomes remain observations rather than converted values; ordinary numeric URL-query parsing stays separate. See [OUTBOX_RECOVERY.md](OUTBOX_RECOVERY.md).
 
-| Workspace            | Responsibility                                                                    | Allowed dependencies                           |
-| -------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `apps/web`           | Next.js App Router interface, web session presentation, timeline and recall       | contracts and API client; no direct DB access  |
-| `apps/api`           | Fastify routes, authentication, validation, request limits, transport mapping     | contracts, core, db, server adapters           |
-| `apps/cli`           | Command parsing, Windows capture, local persistence, pairing, sync, ask           | contracts and API client; local SQLite adapter |
-| `apps/mcp`           | Read-only stdio tools and bounded results                                         | contracts and API client; no shell execution   |
-| `apps/worker`        | Queue lifecycle, job handlers, retry and graceful shutdown                        | core, db, provider adapters                    |
-| `packages/contracts` | Versioned DTOs and TypeBox runtime schemas                                        | no application or DB imports                   |
-| `packages/core`      | Identity/access, GitHub, capture ingestion, memory, retrieval, lifecycle services | contracts and explicit ports; server-only      |
-| `packages/db`        | Drizzle schema, migrations, scoped queries and transaction adapters               | contracts where useful; no client imports      |
+| Workspace            | Responsibility                                                                           | Allowed dependencies                                                     |
+| -------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `apps/web`           | Next.js App Router interface, web session presentation, timeline and recall              | contracts and API client; no direct DB access                            |
+| `apps/api`           | Fastify routes, authentication, validation, request limits, transport mapping            | contracts, core, db, server adapters                                     |
+| `apps/cli`           | Command parsing, Windows capture, local persistence, pairing, sync, ask                  | contracts, client-safe core helpers and API client; local SQLite adapter |
+| `apps/mcp`           | Read-only stdio tools and bounded results                                                | contracts, client-safe core helpers and API client; no shell execution   |
+| `apps/worker`        | Queue lifecycle, job handlers, retry and graceful shutdown                               | core, db, provider adapters                                              |
+| `packages/contracts` | Versioned DTOs and TypeBox runtime schemas                                               | no application or DB imports                                             |
+| `packages/core`      | Domain services plus explicit client-safe validation, excerpts and runtime configuration | contracts and explicit ports; no implicit server bootstrap               |
+| `packages/db`        | Drizzle schema, migrations, scoped queries and transaction adapters                      | contracts where useful; no client imports                                |
 
 Supporting utility packages can be added when genuinely shared. Avoid creating a package for every function or allowing web code to import server secrets through a convenience barrel export.
+
+The implemented private client release bundles CLI and MCP into `@memvora/clients`, with no runtime workspace links or install hooks. A small client-safe core module owns the shared version and explicit credential-source resolution; it accepts a lazy source-development fallback rather than importing server bootstrap or reading secrets on import. Both adapters continue to use the authenticated API for evidence; the capture CLI alone owns its repository-local outbox. Portable bundles require an explicit server data directory or token and never infer a server store from their installation path. The producer audits actual packed bytes against its allowlist and includes dependency licenses. See [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md).
 
 ## Why these choices
 

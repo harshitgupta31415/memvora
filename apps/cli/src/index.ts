@@ -5,13 +5,13 @@ import { mkdirSync } from 'node:fs';
 import type { LocalContext, RecallAnswer, Session, SessionEventsPage } from '@memvora/contracts';
 import { IdSchema, SessionEventsPageSchema, SessionEventsQuerySchema } from '@memvora/contracts';
 import { Check } from 'typebox/value';
+import { CLIENT_VERSION } from '@memvora/core';
 import {
   apiRequest,
   findBindingDirectory,
   LocalOutbox,
   readBinding,
-  readToken,
-  serverDataDir,
+  readCredential,
   writeBinding,
   type Binding,
 } from './local.js';
@@ -43,7 +43,7 @@ import {
 
 const program = new Command()
   .name('memvora')
-  .version('0.2.0')
+  .version(CLIENT_VERSION)
   .enablePositionalOptions()
   .description(
     'Capture explicit commands and recall cited engineering evidence through the authenticated local API.',
@@ -54,15 +54,23 @@ const program = new Command()
     'Local server data directory containing local-token (or MEMVORA_DATA_DIR)',
   );
 
-function connection(binding?: Binding): { origin: string; token: string } {
+function connection(binding?: Binding): {
+  origin: string;
+  token: string;
+  credentialSource: 'environment' | 'file';
+  credentialPath: string | null;
+} {
   const options = program.opts<{ apiUrl?: string; home?: string }>();
+  const credential = readCredential(options.home);
   return {
     origin:
       options.apiUrl ??
       process.env['MEMVORA_API_URL'] ??
       binding?.apiUrl ??
       'http://127.0.0.1:4000',
-    token: readToken(options.home),
+    token: credential.token,
+    credentialSource: credential.source,
+    credentialPath: credential.source === 'file' ? credential.credentialPath : null,
   };
 }
 
@@ -176,13 +184,13 @@ program
   .command('login')
   .description('Verify the local-development token; GitHub/device pairing is not implemented.')
   .action(async () => {
-    const { origin, token } = connection();
-    const me = await apiRequest<LocalContext>(origin, token, '/v1/me');
+    const access = connection();
+    const me = await apiRequest<LocalContext>(access.origin, access.token, '/v1/me');
     console.log(
       `Local API access verified for ${me.user.name}. This is local development mode, not production login.`,
     );
     console.log(
-      `Credential source: MEMVORA_LOCAL_TOKEN or ${join(serverDataDir(program.opts<{ home?: string }>().home), 'local-token')}. The credential is never printed.`,
+      `Credential source: ${access.credentialSource === 'environment' ? 'MEMVORA_LOCAL_TOKEN' : access.credentialPath}. The credential is never printed.`,
     );
   });
 

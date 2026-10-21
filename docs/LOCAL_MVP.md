@@ -15,6 +15,8 @@ Read-only MCP adapter ---+                    |
 
 The web server, CLI and MCP share runtime response contracts and the same local API. They do not open the server evidence database directly. The CLI has its own SQLite outbox for offline durability. The API ordinarily runs the local background processor, one job at a time; a separate worker executable is also present. There is no need to start it for the default development flow.
 
+CLI and MCP version 0.4.0 can also be installed together from a private local tarball without this source checkout. Follow [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md) for Node requirements, isolated installation, explicit server credentials, upgrades and removal. The API and website remain separate processes; source-development commands below retain their existing fallback paths.
+
 Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. Lexical recall also searches the latest imported redacted code snapshot and returns immutable file citations. The optional provider path is separate and remains disabled unless explicitly configured.
 
 Use [OWNER_SETUP.md](OWNER_SETUP.md) for the remaining owner actions: registering and authorizing a real private GitHub App, deliberately enabling an AI provider, and connecting a chosen MCP host. Local capture and recall work without App credentials or AI; GitHub import can use the existing authorized `gh` account when all App settings are absent.
@@ -125,7 +127,7 @@ Direct `node` invocations and MCP hosts do not automatically load the root `.env
 
 ## 3. Local identity and data
 
-The API creates `.memvora/local-token` and `.memvora/server.sqlite` under the project by default. `MEMVORA_DATA_DIR` overrides the server data directory. `MEMVORA_LOCAL_TOKEN` can override the credential; it must contain at least 32 characters. The web server reads it on the server side; CLI/MCP read it from the application root even when capturing another repository.
+The API creates `.memvora/local-token` and `.memvora/server.sqlite` under the project by default. `MEMVORA_DATA_DIR` overrides the server data directory. `MEMVORA_LOCAL_TOKEN` can override the credential; it must contain at least 32 characters. The web server reads it on the server side; source-checkout CLI/MCP entry points retain the application-root fallback even when capturing another repository. Installed portable clients require an explicit server data directory or token and do not search for an application root.
 
 This token identifies a trusted-machine development workspace. It is not GitHub OAuth, a browser session, a per-device credential, company membership or an OS credential-store implementation. The API refuses non-loopback binding and production mode. Do not expose it through port forwarding, a public tunnel or public hosting as if it had production authentication. Clients reject redirects and API-origin URLs containing credentials, queries or fragments.
 

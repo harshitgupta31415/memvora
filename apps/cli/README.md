@@ -1,5 +1,7 @@
 # Windows-first explicit command capture
 
+CLI version 0.4.0 is also available in the private `@memvora/clients` tarball with the MCP adapter. Follow [the installation guide](../../docs/CLIENT_INSTALLATION.md) to use it without workspace links. Installed clients require an explicit `--home`, `MEMVORA_DATA_DIR` or private `MEMVORA_LOCAL_TOKEN`; the application-root fallback described below applies only to source-development entry points.
+
 After building, invoke `node <absolute-project-path>/apps/cli/dist/index.js --help`. During development, use the root `npm run cli -- <arguments>`. For external repositories use the direct absolute executable from that repository's terminal so the intended cwd is captured.
 
 The API must already be running. Its local-development token is read from this application's `.memvora/local-token`, `MEMVORA_DATA_DIR/local-token`, or `MEMVORA_LOCAL_TOKEN`. `--home <directory>` overrides the server data directory. The token is never printed and is only sent to a loopback API. This trusted-machine mode is **not production device pairing or an OS credential-store implementation**. Restrict access to the data folder; never commit it. GitHub authentication and permission synchronization are separate integrations.

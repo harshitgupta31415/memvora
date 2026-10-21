@@ -23,7 +23,7 @@ import {
   type RepositorySourceSearchResponse,
   type SystemStatus,
 } from '@memvora/contracts';
-import { clipRepositorySourceMatch } from '@memvora/core';
+import { CLIENT_VERSION, clipRepositorySourceMatch } from '@memvora/core';
 import * as z from 'zod/v4';
 import { request, toolResult } from './client.js';
 import { buildSessionContextResult } from './session-context.js';
@@ -42,7 +42,7 @@ const annotations = {
 
 // stdout belongs exclusively to the MCP transport; this adapter executes no shell commands.
 serveStdio(() => {
-  const server = new McpServer({ name: 'memvora', version: '0.3.0' });
+  const server = new McpServer({ name: 'memvora', version: CLIENT_VERSION });
   server.registerTool(
     'memvora_status',
     {
