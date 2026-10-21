@@ -30,6 +30,7 @@ import type {
   SessionNotesQuery,
 } from '@memvora/contracts';
 import { clipRepositorySourceMatch } from './source-excerpts.js';
+import { gitDiffSummary, sharedDiffBaseline } from './git-evidence.js';
 import { sessionNoteCitation } from './session-notes.js';
 import type { GitHubConnectionStore } from './github-connection.js';
 import type { SessionSynthesisStore } from './session-synthesis-types.js';
@@ -247,6 +248,14 @@ export function prepareEvents(events: CapturedEvent[]): AcceptedEvent[] {
       throw new DomainError('OUTPUT_LIMIT', 'Output exceeds the 256 KiB per-event limit.', 413);
     if (new Set(input.diffs.map((diff) => diff.phase)).size !== input.diffs.length)
       throw new DomainError('INVALID_DIFFS', 'Only one diff per phase is allowed.');
+    if (
+      input.diffs.some((diff) => diff.baselineCommitSha !== undefined) &&
+      !sharedDiffBaseline(input)
+    )
+      throw new DomainError(
+        'INVALID_DIFFS',
+        'Diff baselines must match the recorded starting commit.',
+      );
     const digest = canonicalDigest(input);
     const prior = accepted.get(input.eventId);
     if (prior && prior.digest !== digest)
@@ -304,7 +313,7 @@ export function deriveObservedMemory(event: CapturedEvent): Memory {
     steps.push({ text: `Recorded output:\n${output}`, sourceIds: [event.eventId] });
   if (event.diffs.length)
     steps.push({
-      text: 'Bounded HEAD-relative Git snapshots are attached to the source event. They may include pre-existing changes and do not identify precise per-command changes or establish which change caused the outcome.',
+      text: `${gitDiffSummary(event)} Snapshots may include pre-existing changes and do not isolate per-command changes or establish causation.`,
       sourceIds: [event.eventId],
     });
   const uncertainty = [

@@ -219,6 +219,10 @@ export function formatSessionHandoverMarkdown(report: SessionHandover): string {
         '',
         metadata({
           phase: diff.phase,
+          baselineCommitSha: diff.baselineCommitSha ?? null,
+          baselineStatus: diff.baselineCommitSha
+            ? 'Explicit captured baseline'
+            : 'Baseline not recorded',
           excerptTruncated: diff.excerptTruncated,
           capturedTruncatedBytes: diff.capturedTruncatedBytes,
         }),

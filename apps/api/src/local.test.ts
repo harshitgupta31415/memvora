@@ -46,6 +46,72 @@ function setup() {
 }
 
 describe('local evidence lifecycle', () => {
+  it('retains explicit Git provenance across exact retries without rewriting legacy records', async () => {
+    const { app, event, store, service } = setup();
+    const legacy = event(1);
+    legacy.git.commitSha = 'a'.repeat(40);
+    legacy.diffs = [{ phase: 'before', text: 'old snapshot', truncatedBytes: 0 }];
+    const fixed = event(2);
+    fixed.git = {
+      commitSha: 'b'.repeat(64),
+      afterCommitSha: null,
+      dirty: true,
+      error: 'after HEAD probe failed',
+    };
+    fixed.capture.complete = false;
+    fixed.diffs = ['before', 'after'].map((phase) => ({
+      phase: phase as 'before' | 'after',
+      baselineCommitSha: fixed.git.commitSha!,
+      text: '',
+      truncatedBytes: 0,
+    }));
+    for (let retry = 0; retry < 2; retry++) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/events/batch',
+        headers,
+        payload: { schemaVersion: 1, events: [legacy, fixed] },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(store.getEvent(service.context(), legacy.eventId)).toEqual(legacy);
+      expect(store.getEvent(service.context(), fixed.eventId)).toEqual(fixed);
+    }
+    const rewritten = structuredClone(legacy);
+    rewritten.diffs[0]!.baselineCommitSha = legacy.git.commitSha!;
+    expect(() => service.ingest([rewritten])).toThrow(/reused with different evidence/);
+    expect(store.dashboard(service.context()).counts.events).toBe(2);
+  });
+
+  it('rejects malformed and contradictory Git provenance atomically', async () => {
+    const { app, event, store, service } = setup();
+    const captured = event();
+    captured.git.commitSha = 'a'.repeat(40);
+    captured.diffs = [
+      { phase: 'before', baselineCommitSha: 'a'.repeat(40), text: '', truncatedBytes: 0 },
+    ];
+    const invalids = [
+      { ...captured, git: { ...captured.git, afterCommitSha: 'a'.repeat(41) } },
+      { ...captured, git: { ...captured.git, afterCommitSha: `${'a'.repeat(40)}\n` } },
+      { ...captured, diffs: [{ ...captured.diffs[0]!, baselineCommitSha: 'b'.repeat(40) }] },
+      { ...captured, diffs: [...captured.diffs, { phase: 'after', text: '', truncatedBytes: 0 }] },
+      { ...captured, git: { ...captured.git, commitSha: null } },
+      {
+        ...captured,
+        diffs: [{ ...captured.diffs[0]!, baselineCommitSha: `${'a'.repeat(64)}\r\n` }],
+      },
+    ];
+    for (const invalid of invalids) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/events/batch',
+        headers,
+        payload: { schemaVersion: 1, events: [event(2), invalid] },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(store.dashboard(service.context()).counts).toMatchObject({ events: 0, queuedJobs: 0 });
+    }
+  });
+
   it('requires a bearer token and rejects hostile Host and Origin headers', async () => {
     const { app } = setup();
     expect((await app.inject({ method: 'GET', url: '/v1/dashboard' })).statusCode).toBe(401);

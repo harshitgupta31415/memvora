@@ -46,7 +46,7 @@ describe('configured enrichment trust boundary', () => {
     expect(memory.id).toBe(event.eventId);
     expect(memory.outcome).toBe('exit 1');
     expect(memory.sources[0]?.id).toBe(event.eventId);
-    expect(memory.provenance?.promptVersion).toBe('event-summary-v1');
+    expect(memory.provenance?.promptVersion).toBe('event-summary-v2');
     const request = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)) as {
       messages: Array<{ content: string }>;
     };
@@ -56,6 +56,34 @@ describe('configured enrichment trust boundary', () => {
     await expect(createEnricher(config, upstream(summary(randomUUID())))(event)).rejects.toThrow(
       'outside',
     );
+  });
+  it('keeps fixed baseline and separate HEAD observations in bounded provider excerpts', async () => {
+    const fixed = structuredClone(event);
+    fixed.git = { commitSha: 'a'.repeat(64), afterCommitSha: 'b'.repeat(64), dirty: true };
+    fixed.diffs = ['before', 'after'].map((phase) => ({
+      phase: phase as 'before' | 'after',
+      baselineCommitSha: 'a'.repeat(64),
+      text: 'x'.repeat(5000),
+      truncatedBytes: 0,
+    }));
+    const fetcher = upstream(summary(event.eventId));
+    await createEnricher(config, fetcher)(fixed);
+    const body = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body)) as {
+      messages: Array<{ content: string }>;
+    };
+    const input = JSON.parse(body.messages[1]!.content) as {
+      afterCommitSha: string;
+      diffs: Array<{ baselineCommitSha: string; text: string }>;
+      diffSummary: string;
+    };
+    expect(input.afterCommitSha).toBe('b'.repeat(64));
+    expect(
+      input.diffs.every(
+        (diff) => diff.baselineCommitSha === 'a'.repeat(64) && diff.text.length === 4000,
+      ),
+    ).toBe(true);
+    expect(input.diffSummary).toContain('Captured snapshot texts match');
+    expect(body.messages[0]!.content).toContain('does not prove the command caused');
   });
   it('does not fabricate success on provider outage or malformed output', async () => {
     await expect(

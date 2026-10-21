@@ -121,8 +121,8 @@ describe('observed investigation recap', () => {
     expect(JSON.stringify(recap)).not.toContain('plain-secret');
     expect(recap.steps[0]!.outputExcerpt).not.toContain('\u0085');
     expect(recap.steps[0]!.outputExcerpt).not.toContain('\u001b');
-    expect(recap.steps[0]!.diffSummary).toContain('Snapshot text was truncated');
-    expect(recap.steps[0]!.diffSummary).not.toContain('Snapshot texts differ');
+    expect(recap.steps[0]!.diffSummary).toContain('Snapshot text truncated');
+    expect(recap.steps[0]!.diffSummary).not.toContain('Captured snapshot texts differ');
     expect(recap.counts).toMatchObject({ withDiffs: 1, incompleteCapture: 1 });
     expect(recap.uncertainty.join(' ')).toContain('pre-existing changes');
     expect(Check(SessionRecapSchema, recap)).toBe(true);
@@ -139,10 +139,21 @@ describe('observed investigation recap', () => {
       { phase: 'after', text: '', truncatedBytes: 0 },
     ];
     const truncated = event(2);
+    truncated.git.commitSha = 'a'.repeat(40);
     truncated.capture.complete = false;
     truncated.diffs = [
-      { phase: 'before', text: 'matching retained prefix', truncatedBytes: 100 },
-      { phase: 'after', text: 'matching retained prefix', truncatedBytes: 200 },
+      {
+        phase: 'before',
+        text: 'matching retained prefix',
+        truncatedBytes: 100,
+        baselineCommitSha: 'a'.repeat(40),
+      },
+      {
+        phase: 'after',
+        text: 'matching retained prefix',
+        truncatedBytes: 200,
+        baselineCommitSha: 'a'.repeat(40),
+      },
     ];
     const missing = event(3);
     missing.git.error = 'repository probe failed';
@@ -153,14 +164,15 @@ describe('observed investigation recap', () => {
       events: [unavailable, truncated, missing],
       totalEventCount: 3,
     });
-    expect(recap.steps[0]!.diffSummary).toContain('Git probing failed');
+    expect(recap.steps[0]!.diffSummary).toContain('Git probe failed');
     expect(recap.steps[0]!.diffSummary).toContain('comparison unavailable');
     expect(recap.steps[1]!.diffSummary).toContain('truncated');
-    expect(recap.steps[1]!.diffSummary).toContain('comparison unavailable');
-    expect(recap.steps[2]!.diffSummary).toContain('Git probing failed; no diff snapshots');
-    expect(recap.steps.every((step) => !step.diffSummary.includes('Snapshot texts match'))).toBe(
-      true,
-    );
+    expect(recap.steps[1]!.diffSummary).toContain('Comparison unavailable');
+    expect(recap.steps[2]!.diffSummary).toContain('Git probe failed');
+    expect(recap.steps[2]!.diffSummary).toContain('No diff snapshots');
+    expect(
+      recap.steps.every((step) => !step.diffSummary.includes('Captured snapshot texts match')),
+    ).toBe(true);
     expect(recap.counts).toMatchObject({ passed: 3, incompleteCapture: 3, withDiffs: 1 });
     expect(recap.uncertainty.join(' ')).toContain('incomplete or truncated evidence capture');
     expect(Check(SessionRecapSchema, recap)).toBe(true);
@@ -169,27 +181,57 @@ describe('observed investigation recap', () => {
   it('keeps complete snapshot text comparisons distinct from per-command change attribution', () => {
     const { session, event } = fixture();
     const unchanged = event(1);
+    unchanged.git.commitSha = 'a'.repeat(40);
     unchanged.diffs = [
-      { phase: 'before', text: '', truncatedBytes: 0 },
-      { phase: 'after', text: '', truncatedBytes: 0 },
+      { phase: 'before', text: '', truncatedBytes: 0, baselineCommitSha: 'a'.repeat(40) },
+      { phase: 'after', text: '', truncatedBytes: 0, baselineCommitSha: 'a'.repeat(40) },
     ];
     const different = event(2);
+    different.git.commitSha = 'a'.repeat(40);
+    different.git.afterCommitSha = 'b'.repeat(40);
     different.diffs = [
-      { phase: 'before', text: 'pre-existing change', truncatedBytes: 0 },
-      { phase: 'after', text: 'another retained snapshot', truncatedBytes: 0 },
+      {
+        phase: 'before',
+        text: 'pre-existing change',
+        truncatedBytes: 0,
+        baselineCommitSha: 'a'.repeat(40),
+      },
+      {
+        phase: 'after',
+        text: 'another retained snapshot',
+        truncatedBytes: 0,
+        baselineCommitSha: 'a'.repeat(40),
+      },
     ];
     const recap = deriveSessionRecap({
       session,
       events: [unchanged, different],
       totalEventCount: 2,
     });
-    expect(recap.steps[0]!.diffSummary).toContain('Snapshot texts match');
-    expect(recap.steps[1]!.diffSummary).toContain('Snapshot texts differ');
-    expect(recap.steps.every((step) => step.diffSummary.includes('HEAD-relative snapshot'))).toBe(
-      true,
-    );
-    expect(recap.uncertainty.join(' ')).toContain('do not isolate changes made by a command');
+    expect(recap.steps[0]!.diffSummary).toContain('Captured snapshot texts match');
+    expect(recap.steps[1]!.diffSummary).toContain('Captured snapshot texts differ');
+    expect(recap.steps[1]!.diffSummary).toContain('Observed HEAD differs after execution');
+    expect(
+      recap.steps.every((step) => step.diffSummary.includes('Baseline: pre-command commit')),
+    ).toBe(true);
+    expect(recap.uncertainty.join(' ')).toContain('do not isolate command effects');
     expect(recap.uncertainty.join(' ')).toContain('causal fix are not established');
+    expect(Check(SessionRecapSchema, recap)).toBe(true);
+  });
+
+  it('keeps successful legacy snapshots with identical text explicitly incomparable', () => {
+    const { session, event } = fixture();
+    const legacy = event(1);
+    legacy.git.commitSha = 'a'.repeat(40);
+    legacy.diffs = [
+      { phase: 'before', text: 'identical legacy snapshot', truncatedBytes: 0 },
+      { phase: 'after', text: 'identical legacy snapshot', truncatedBytes: 0 },
+    ];
+    const recap = deriveSessionRecap({ session, events: [legacy], totalEventCount: 1 });
+    expect(recap.steps[0]!.diffSummary).toContain('Baseline not recorded');
+    expect(recap.steps[0]!.diffSummary).toContain('comparison unavailable');
+    expect(recap.steps[0]!.diffSummary).not.toMatch(/texts (?:match|differ)/u);
+    expect(recap.uncertainty.join(' ')).toContain('legacy baselines are unknown');
     expect(Check(SessionRecapSchema, recap)).toBe(true);
   });
 

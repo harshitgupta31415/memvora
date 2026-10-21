@@ -23,7 +23,12 @@ function fixture(): SessionEventsPage {
       args: Array.from({ length: 256 }, () => unicode.repeat(2048)),
     },
     cwd: unicode.repeat(512),
-    git: { commitSha: 'a'.repeat(40), dirty: true, error: unicode.repeat(125) },
+    git: {
+      commitSha: 'a'.repeat(64),
+      afterCommitSha: 'b'.repeat(64),
+      dirty: true,
+      error: unicode.repeat(125),
+    },
     outcome: {
       kind: 'spawn_failed',
       exitCode: null,
@@ -37,8 +42,18 @@ function fixture(): SessionEventsPage {
       text: unicode.repeat(2048),
     })),
     diffs: [
-      { phase: 'before', text: unicode.repeat(2048), truncatedBytes: 234 },
-      { phase: 'after', text: unicode.repeat(2048), truncatedBytes: 345 },
+      {
+        phase: 'before',
+        text: unicode.repeat(2048),
+        truncatedBytes: 234,
+        baselineCommitSha: 'a'.repeat(64),
+      },
+      {
+        phase: 'after',
+        text: unicode.repeat(2048),
+        truncatedBytes: 345,
+        baselineCommitSha: 'a'.repeat(64),
+      },
     ],
   }));
   const sources = events.map((event) => ({
@@ -113,6 +128,11 @@ describe('aggregate MCP session history context budget', () => {
       expect(event.outcome.kind).toBe(input.events[index]!.outcome.kind);
       expect(event.outcome.exitCode).toBeNull();
       expect(event.capture).toEqual(input.events[index]!.capture);
+      expect(event.git.commitSha).toBe(input.events[index]!.git.commitSha);
+      expect(event.git.afterCommitSha).toBe(input.events[index]!.git.afterCommitSha);
+      expect(event.diffs.map((diff) => [diff.phase, diff.baselineCommitSha])).toEqual(
+        input.events[index]!.diffs.map((diff) => [diff.phase, diff.baselineCommitSha]),
+      );
       expect(event.totalOutputChunks).toBe(4);
       expect(event.command.totalArguments).toBe(256);
     }
@@ -130,6 +150,22 @@ describe('aggregate MCP session history context budget', () => {
     expect(buildSessionContextResult(input)).toEqual(result);
     expect(input.events[0]!.command.args).toHaveLength(256);
     expect(input.memories[0]!.steps).toHaveLength(30);
+  });
+
+  it('keeps an unavailable after-HEAD distinct from absent legacy provenance', () => {
+    const input = fixture();
+    delete input.events[0]!.git.afterCommitSha;
+    for (const diff of input.events[0]!.diffs) delete diff.baselineCommitSha;
+    input.events[1]!.git.afterCommitSha = null;
+    const result = buildSessionContextResult(input);
+    expect(Object.hasOwn(result.events[0]!.git, 'afterCommitSha')).toBe(false);
+    expect(result.events[0]!.diffs.every((diff) => !Object.hasOwn(diff, 'baselineCommitSha'))).toBe(
+      true,
+    );
+    expect(Object.hasOwn(result.events[1]!.git, 'afterCommitSha')).toBe(true);
+    expect(result.events[1]!.git.afterCommitSha).toBeNull();
+    expect(result.evidenceNotice).toContain('baseline was not recorded');
+    expect(Object.hasOwn(input.events[0]!.git, 'afterCommitSha')).toBe(false);
   });
 
   it('retains honest empty-page navigation and rejects unresolved page provenance', () => {

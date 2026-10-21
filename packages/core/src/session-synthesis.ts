@@ -20,9 +20,10 @@ import {
 import { DomainError, redactText, type SessionHandoverEvidence } from './local-service.js';
 import { deriveSessionHandover } from './session-handover.js';
 import { sessionNoteCitation } from './session-notes.js';
+import { sharedDiffBaseline } from './git-evidence.js';
 import type { SessionSynthesizer, SessionSynthesisStore } from './session-synthesis-types.js';
 
-export const sessionSynthesisPromptVersion = 'session-analysis-v1' as const;
+export const sessionSynthesisPromptVersion = 'session-analysis-v2' as const;
 export const sessionSynthesisInputByteLimit = 65_536;
 export const sessionSynthesisAnalysisByteLimit = 24_576;
 export const sessionSynthesisHistoryByteLimit = 65_536;
@@ -177,7 +178,14 @@ export function buildSessionSynthesisInput(evidence: SessionHandoverEvidence): {
             .filter(Boolean)
             .join('\n'),
         );
-        const diff = clean(event.diffs.map((item) => `[${item.phase}] ${item.text}`).join('\n'));
+        const diff = clean(
+          event.diffs
+            .map(
+              (item) =>
+                `[${item.phase}; baseline ${item.baselineCommitSha ?? 'not recorded'}] ${item.text}`,
+            )
+            .join('\n'),
+        );
         return {
           id: event.eventId,
           sequence: event.sequence,
@@ -185,6 +193,10 @@ export function buildSessionSynthesisInput(evidence: SessionHandoverEvidence): {
           command: clip(command, commandLimit),
           outcome: { kind: event.outcome.kind, exitCode: event.outcome.exitCode },
           commitSha: event.git.commitSha,
+          ...(event.git.afterCommitSha === undefined
+            ? {}
+            : { afterCommitSha: event.git.afterCommitSha }),
+          diffBaselineCommitSha: sharedDiffBaseline(event),
           output: clip(output, limit),
           diff: clip(diff, limit),
           captureIncomplete:

@@ -8,6 +8,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./git-evidence": {
+      "types": "./dist/git-evidence.d.ts",
+      "default": "./dist/git-evidence.js"
+    },
     "./session-synthesis": {
       "types": "./dist/session-synthesis.d.ts",
       "default": "./dist/session-synthesis.js"

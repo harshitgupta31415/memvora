@@ -1,6 +1,6 @@
 # Local read-only MCP adapter
 
-Adapter version 0.7.0 can be installed with the CLI from a private local tarball. See [CLIENT_INSTALLATION.md](../../docs/CLIENT_INSTALLATION.md) for the direct Node launcher and explicit server credential configuration. The package works independently of source workspace links; source-development instructions below retain their existing application-root fallback.
+Adapter version 0.8.0 can be installed with the CLI from a private local tarball. See [CLIENT_INSTALLATION.md](../../docs/CLIENT_INSTALLATION.md) for the direct Node launcher and explicit server credential configuration. The package works independently of source workspace links; source-development instructions below retain their existing application-root fallback.
 
 This uses the official TypeScript MCP server SDK v2 and stdio transport. Registered tools:
 

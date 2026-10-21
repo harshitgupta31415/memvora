@@ -14,7 +14,7 @@ Investigation discovery applies title, repository and open/closed filters on the
 
 The local [setup guide](http://127.0.0.1:3000/setup) generates PowerShell commands for capturing another repository and a read-only MCP configuration using this installation's absolute paths. Repeating `init` verifies an existing binding without replacing its investigation or local outbox. A different repository/API selector requires deliberate separate setup; initialization never silently rebinds stored captures.
 
-CLI and MCP version 0.7.0 are also available together as a private local npm tarball. [CLIENT_INSTALLATION.md](docs/CLIENT_INSTALLATION.md) covers offline installation outside this checkout, explicit server credentials, upgrades and removal. The website/API remain separate; installation does not add remote authentication.
+CLI and MCP version 0.8.0 are also available together as a private local npm tarball. [CLIENT_INSTALLATION.md](docs/CLIENT_INSTALLATION.md) covers offline installation outside this checkout, explicit server credentials, upgrades and removal. The website/API remain separate; installation does not add remote authentication.
 
 [Optional investigation interpretation](docs/SESSION_SYNTHESIS.md) provides explicitly requested, cited AI hypotheses across bounded original attempts and authored notes. It is disabled by default, independent of per-command enrichment, and available through the website/CLI with read-only MCP retrieval. Opening a page or asking a recall question never queues it.
 

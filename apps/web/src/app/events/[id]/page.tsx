@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { EventResponseSchema } from '@memvora/contracts';
+import { gitDiffSummary } from '@memvora/core/git-evidence';
 import { apiRequest } from '@/lib/api';
 import { Icon } from '@/components/icon';
 import { DateLabel, ErrorState, PageHeading, SectionHeading, StatusBadge } from '@/components/ui';
@@ -121,12 +122,22 @@ export default async function EventDetail({ params }: { params: Promise<{ id: st
               Missing diffs do not establish that files were unchanged.
             </p>
           )}
+          {event.diffs.length > 0 && <p className="muted-caption">{gitDiffSummary(event)}</p>}
           {event.diffs.map((diff) => (
             <section key={diff.phase}>
               <SectionHeading
-                title={`Code changes ${diff.phase === 'before' ? 'before' : 'after'} the command`}
-                description="Recorded local diff; includes only captured tracked changes."
+                title={`Diff snapshot ${diff.phase === 'before' ? 'before' : 'after'} the command`}
+                description="Captured tracked changes can include pre-existing or concurrent edits. This is not a patch attributed to the command."
               />
+              <p className="muted-caption" style={{ overflowWrap: 'anywhere' }}>
+                {diff.baselineCommitSha ? (
+                  <>
+                    Baseline commit: <code>{diff.baselineCommitSha}</code>
+                  </>
+                ) : (
+                  'Baseline not recorded'
+                )}
+              </p>
               <div className="code-panel">
                 <div className="code-panel-heading">
                   <span>{diff.phase === 'before' ? 'Starting' : 'Ending'} diff</span>
@@ -180,13 +191,19 @@ export default async function EventDetail({ params }: { params: Promise<{ id: st
                 <span className="mono">{event.cwd}</span>
               </li>
               <li>
-                <span>Commit</span>
+                <span>Starting HEAD</span>
                 <span className="mono">{event.git.commitSha ?? 'Not available'}</span>
               </li>
               <li>
-                <span>Working tree</span>
+                <span>Starting working tree</span>
                 <span>{workingTree}</span>
               </li>
+              {event.git.afterCommitSha !== undefined && (
+                <li>
+                  <span>After-command HEAD</span>
+                  <span className="mono">{event.git.afterCommitSha ?? 'Not available'}</span>
+                </li>
+              )}
               <li>
                 <span>Redaction</span>
                 <span>
@@ -195,6 +212,12 @@ export default async function EventDetail({ params }: { params: Promise<{ id: st
               </li>
             </ul>
             {event.git.error && <p className="muted-caption">Git context: {event.git.error}</p>}
+            {event.git.afterCommitSha !== undefined && (
+              <p className="muted-caption">
+                Starting and after-command HEAD are separate observations. Different values do not
+                establish which process moved HEAD.
+              </p>
+            )}
           </section>
           <div className="notice notice-neutral">
             <Icon name="link" size={17} />

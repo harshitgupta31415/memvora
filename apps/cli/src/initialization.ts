@@ -1,4 +1,4 @@
-import { lstatSync, writeFileSync } from 'node:fs';
+import { lstatSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   IdSchema,
@@ -77,10 +77,32 @@ function within(root: string, path: string): boolean {
 
 /** Search only a proven Git boundary; an unversioned cwd cannot inherit a home/ancestor binding. */
 function initializationRoot(cwd: string, gitRoot?: string): string {
-  const boundary = gitRoot ?? cwd;
-  if (!within(boundary, cwd))
-    throw new Error('Git returned a repository root outside the current directory.');
+  let boundary = gitRoot ?? cwd;
   let location = cwd;
+  if (gitRoot !== undefined) {
+    let physicalCwd: string;
+    let physicalBoundary: string;
+    try {
+      physicalCwd = realpathSync.native(cwd);
+      physicalBoundary = realpathSync.native(gitRoot);
+    } catch {
+      throw new Error('Git repository paths could not be verified. No files were changed.');
+    }
+    if (!within(physicalBoundary, physicalCwd))
+      throw new Error('Git returned a repository root outside the current directory.');
+    const suffix = relative(boundary, cwd);
+    const physicalSuffix = relative(physicalBoundary, physicalCwd);
+    const sameSuffix =
+      process.platform === 'win32'
+        ? suffix.toLowerCase() === physicalSuffix.toLowerCase()
+        : suffix === physicalSuffix;
+    // Preserve existing lexical bindings when valid; aliases with different ancestry use the
+    // proven physical Git boundary rather than walking an unrelated alias parent.
+    if (!within(boundary, cwd) || !sameSuffix) {
+      boundary = physicalBoundary;
+      location = physicalCwd;
+    }
+  }
   while (within(boundary, location)) {
     if (hasEntry(join(location, '.memvora', 'config.json'))) return location;
     if (location === boundary) break;

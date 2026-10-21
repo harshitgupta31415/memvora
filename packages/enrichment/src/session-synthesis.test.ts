@@ -132,7 +132,7 @@ describe('explicit session synthesis provider boundary', () => {
     expect(first.configuration).toMatchObject({
       provider: 'provider.example',
       model: 'fixture-model',
-      promptVersion: 'session-analysis-v1',
+      promptVersion: 'session-analysis-v2',
     });
     expect(JSON.stringify(first.configuration)).not.toContain(environment.AI_API_KEY);
     expect(() =>

@@ -19,10 +19,28 @@ function EventExcerpt({ event }: { event: HandoverEvent }) {
         Working directory{event.cwdTruncated ? ' (excerpt)' : ''}:{' '}
         <code>{event.cwdExcerpt || 'Not retained'}</code>
         <br />
-        Commit: <code>{event.git.commitSha ?? 'Not recorded'}</code> · Working tree{' '}
-        {event.git.error ? 'unavailable' : event.git.dirty ? 'dirty' : 'clean'}
+        Starting HEAD: <code>{event.git.commitSha ?? 'Not recorded'}</code>
+        <br />
+        Starting working tree:{' '}
+        {event.git.dirty
+          ? 'uncommitted changes'
+          : event.git.error || !event.git.commitSha
+            ? 'unknown (Git context unavailable)'
+            : 'clean when observed'}
+        {event.git.afterCommitSha !== undefined && (
+          <>
+            <br />
+            After-command HEAD: <code>{event.git.afterCommitSha ?? 'Not available'}</code>
+          </>
+        )}
       </p>
       {event.git.error && <p className={styles.caption}>Git context warning: {event.git.error}</p>}
+      {event.git.afterCommitSha !== undefined && (
+        <p className={styles.caption}>
+          HEAD values are separate observations. Different values do not establish which process
+          moved HEAD.
+        </p>
+      )}
       <p className={styles.caption}>
         Original capture: {event.capture.complete ? 'complete' : 'incomplete'} · Truncation:{' '}
         {event.capture.truncatedBytes} bytes · Redaction applied:{' '}
@@ -60,6 +78,16 @@ function EventExcerpt({ event }: { event: HandoverEvent }) {
             {diff.phase === 'before' ? 'Before-command' : 'After-command'} diff · Export excerpt
             shortened: {diff.excerptTruncated ? 'yes' : 'no'} · Original diff capture truncation:{' '}
             {diff.capturedTruncatedBytes} bytes
+          </p>
+          <p className={styles.caption}>
+            {diff.baselineCommitSha ? (
+              <>
+                Baseline commit: <code>{diff.baselineCommitSha}</code>
+              </>
+            ) : (
+              'Baseline not recorded'
+            )}
+            . Captured tracked changes can include pre-existing or concurrent edits.
           </p>
           {diff.text ? (
             <pre

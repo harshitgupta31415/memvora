@@ -126,13 +126,14 @@ export function fitEventEnvelope(event: CapturedEvent): CapturedEvent {
 async function snapshotDiff(
   cwd: string,
   token: string,
+  baselineCommitSha: string,
   git: typeof gitText,
 ): Promise<GitProbeResult> {
   const result = await git(
     cwd,
     [
       'diff',
-      'HEAD',
+      baselineCommitSha,
       '--no-ext-diff',
       '--no-textconv',
       '--no-color',
@@ -202,18 +203,25 @@ export async function captureCommand(
   const recordFailure = (phase: string, result: GitProbeResult): void => {
     if (!result.ok) failures.push(`${phase} (${result.failure ?? 'failed'})`);
   };
-  const sha = await git(options.cwd, ['rev-parse', '--verify', 'HEAD']);
-  const commit =
-    sha.ok &&
-    sha.truncatedBytes === 0 &&
-    /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/u.test(sha.text.trim())
-      ? sha.text.trim()
-      : null;
-  if (!commit) recordFailure('HEAD', sha.ok ? { text: '', truncatedBytes: 0, ok: false } : sha);
+  const readHead = async (phase: string): Promise<string | null> => {
+    const sha = await git(options.cwd, ['rev-parse', '--verify', 'HEAD']);
+    const commit =
+      sha.ok &&
+      sha.truncatedBytes === 0 &&
+      /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/u.test(sha.text.trim())
+        ? sha.text.trim()
+        : null;
+    if (commit === null)
+      recordFailure(phase, sha.ok ? { text: '', truncatedBytes: 0, ok: false } : sha);
+    return commit;
+  };
+  const commit = await readHead('HEAD');
   const dirty = await git(options.cwd, ['status', '--porcelain'], 1024);
   recordFailure('status', dirty);
-  const before = await snapshotDiff(options.cwd, options.token, git);
-  recordFailure('before diff', before);
+  // A missing start commit has no trustworthy fixed baseline, including an unborn HEAD.
+  const before =
+    commit === null ? null : await snapshotDiff(options.cwd, options.token, commit, git);
+  if (before) recordFailure('before diff', before);
   const gitError = () =>
     failures.length ? `Git evidence unavailable: ${failures.join('; ')}.` : undefined;
   const initial = {
@@ -232,9 +240,17 @@ export async function captureCommand(
       dirty: dirty.ok && Boolean(dirty.text.trim()),
       ...(gitError() ? { error: gitError()! } : {}),
     },
-    diffs: before.ok
-      ? [{ phase: 'before' as const, text: before.text, truncatedBytes: before.truncatedBytes }]
-      : [],
+    diffs:
+      before?.ok && commit !== null
+        ? [
+            {
+              phase: 'before' as const,
+              text: before.text,
+              truncatedBytes: before.truncatedBytes,
+              baselineCommitSha: commit,
+            },
+          ]
+        : [],
   };
   const sequence = options.outbox.begin(eventId, options.sessionId, initial);
   let outputBytes = 0;
@@ -347,12 +363,15 @@ export async function captureCommand(
       },
     };
   }
-  const after = await snapshotDiff(options.cwd, options.token, git);
-  recordFailure('after diff', after);
+  const afterCommit = await readHead('after HEAD');
+  const after =
+    commit === null ? null : await snapshotDiff(options.cwd, options.token, commit, git);
+  if (after) recordFailure('after diff', after);
   if (gitError()) initial.git = { ...initial.git, error: gitError()! };
   truncatedBytes += stdout.suppressedBytes + stderr.suppressedBytes;
   const event = fitEventEnvelope({
     ...initial,
+    git: { ...initial.git, afterCommitSha: afterCommit },
     sequence,
     endedAt: new Date().toISOString(),
     outcome,
@@ -368,8 +387,15 @@ export async function captureCommand(
     output: options.outbox.output(eventId),
     diffs: [
       ...initial.diffs,
-      ...(after.ok
-        ? [{ phase: 'after' as const, text: after.text, truncatedBytes: after.truncatedBytes }]
+      ...(after?.ok && commit !== null
+        ? [
+            {
+              phase: 'after' as const,
+              text: after.text,
+              truncatedBytes: after.truncatedBytes,
+              baselineCommitSha: commit,
+            },
+          ]
         : []),
     ],
   });

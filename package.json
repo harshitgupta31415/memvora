@@ -40,6 +40,7 @@
     "acceptance:recap": "node scripts/acceptance-recap.mjs",
     "acceptance:journal": "node scripts/acceptance-journal.mjs",
     "acceptance:journal-outbox": "node scripts/acceptance-journal-outbox.mjs",
+    "acceptance:git-baseline": "node scripts/acceptance-git-baseline.mjs",
     "acceptance:synthesis": "node scripts/acceptance-synthesis.mjs",
     "acceptance:directory": "node scripts/acceptance-directory.mjs",
     "acceptance:setup": "node scripts/acceptance-setup.mjs",
