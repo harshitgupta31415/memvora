@@ -42,7 +42,7 @@ const token = randomBytes(32).toString('hex');
 const trapToken = `UnrelatedPortableStoreFixture${randomBytes(24).toString('hex')}`;
 const foreignMarker = 'ForeignPackagedClientScopeMustStayPrivate';
 const query = 'MemvoraPackagedClientQXZ9071Error';
-const version = '0.4.0';
+const version = '0.5.0';
 const children = new Set();
 const states = new WeakMap();
 const steps = [];
@@ -56,6 +56,7 @@ const toolsExpected = [
   'get_session_context',
   'get_session_recap',
   'get_session_handover',
+  'get_session_synthesis',
   'search_session_notes',
   'get_session_note',
   'get_session_notes',
@@ -819,6 +820,7 @@ try {
       new Date().toISOString(),
     );
   const foreignRepository = store.createRepository(foreign, { name: foreignMarker });
+  const foreignSession = store.createSession(foreign, { repositoryId: foreignRepository.id });
   const mcp = protocol({ env: configured });
   await mcp.initialize();
   const callsBeforeRead = providerCalls;
@@ -850,6 +852,13 @@ try {
   );
   assert.equal(page.events[0].outcome.exitCode, 7);
   assert.equal(page.page.snapshotEventCount, 1);
+  const synthesis = await mcp.tool('get_session_synthesis', { id: binding.sessionId });
+  assert.equal(synthesis.sessionId, binding.sessionId);
+  assert.equal(synthesis.configuration, null);
+  assert.equal(synthesis.request, null);
+  assert.equal(synthesis.readOnly, true);
+  await mcp.tool('get_session_synthesis', { id: foreignSession.id }, true);
+  await mcp.tool('get_session_synthesis', { id: binding.sessionId, requestId: randomUUID() }, true);
   assert.deepEqual(
     (await mcp.tool('search_memory', { query, repositoryIds: [], limit: 5 })).items,
     [],
@@ -862,6 +871,7 @@ try {
   await mcp.tool('search_memory', { query, repositoryIds: [foreignRepository.id], limit: 5 }, true);
   const beforeUnknown = requests;
   await mcp.tool('search_memory', { query, repositoryId: binding.repositoryId }, true);
+  await mcp.tool('get_session_synthesis', { id: binding.sessionId, generate: true }, true);
   assert.equal(requests, beforeUnknown, 'Unknown MCP selectors reached the API.');
   assert.equal(providerCalls, callsBeforeRead);
   assert.equal(
@@ -874,8 +884,17 @@ try {
   await wrongMcp.tool('get_memory', { id: capturedId }, true);
   await wrongMcp.end();
   assert.equal(providerCalls, 0);
+  const synthesisPreview = JSON.parse(
+    (await cli(['session', 'synthesis-preview', binding.sessionId], { env: configured })).stdout,
+  );
+  assert.equal(synthesisPreview.availability, 'disabled');
+  assert.equal(synthesisPreview.sessionId, binding.sessionId);
+  const synthesisStatus = JSON.parse(
+    (await cli(['session', 'synthesis', binding.sessionId], { env: configured })).stdout,
+  );
+  assert.equal(synthesisStatus.request, null);
   steps.push(
-    'Installed MCP discovered12 read-only tools, retained original UUIDs and denied unknown/foreign/wrong-credential selectors without enrichment.',
+    'Installed MCP discovered13 read-only tools, retained original UUIDs and denied unknown/foreign/wrong-credential selectors without enrichment.',
   );
 
   stage = 'reinstall and uninstall retention';

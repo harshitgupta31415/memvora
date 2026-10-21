@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue, SQLOutputValue } from 'node:sqlite';
 import type {
   CapturedEvent,
+  CreateSessionSynthesis,
   CreateRepository,
   CreateSession,
   CreateSessionNote,
@@ -30,6 +31,8 @@ import type {
   SessionNote,
   SessionNotesPage,
   SessionNotesQuery,
+  SessionSynthesisAnalysis,
+  SessionSynthesisConfiguration,
 } from '@memvora/contracts';
 import {
   deriveRawEvidenceMemory,
@@ -48,8 +51,10 @@ import type {
   LocalEvidenceStore,
   SessionHandoverEvidence,
   SessionRecapEvidence,
+  SessionSynthesisJob,
 } from '@memvora/core';
 import { GitHubConnections } from './github-connections.js';
+import { SessionSyntheses } from './session-syntheses.js';
 import { SessionDirectoryCursors } from './session-directory-cursor.js';
 import type { SessionDirectoryScope } from './session-directory-cursor.js';
 import {
@@ -61,6 +66,7 @@ import {
   localRetryMigrationSql,
   localSessionHistoryMigrationSql,
   localSessionNotesMigrationSql,
+  localSessionSynthesisMigrationSql,
   localSchemaSql,
 } from './sqlite-schema.js';
 export { LOCAL_SQLITE_SCHEMA_VERSION } from './sqlite-schema.js';
@@ -182,6 +188,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   private readonly historyCursorSecret: Buffer;
   private readonly sessionDirectoryCursors: SessionDirectoryCursors;
   private readonly githubConnections: GitHubConnections;
+  private readonly sessionSyntheses: SessionSyntheses;
   private closed = false;
 
   constructor(path: string) {
@@ -240,6 +247,10 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
           );
         this.database.exec('PRAGMA user_version=8');
       }
+      if (currentVersion < 9) {
+        this.database.exec(localSessionSynthesisMigrationSql);
+        this.database.exec('PRAGMA user_version=9');
+      }
     });
     this.transaction(() => {
       if (!this.one('SELECT user_id FROM local_identity WHERE singleton=1')) {
@@ -278,6 +289,12 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
       database: this.database,
       transaction: (action) => this.transaction(action),
       requireContext: (context) => this.requireContext(context),
+    });
+    this.sessionSyntheses = new SessionSyntheses({
+      database: this.database,
+      transaction: (action, mode) => this.transaction(action, mode),
+      requireContext: (context) => this.requireContext(context),
+      evidence: (context, id) => this.sessionHandoverEvidence(context, id),
     });
   }
 
@@ -921,89 +938,122 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     };
   }
   getSessionHandoverEvidence(context: LocalContext, id: string): SessionHandoverEvidence {
-    return this.transaction(() => {
-      const recapEvidence = this.sessionRecapEvidence(context, id);
-      const repository = this.repositoryDto(
-        this.repositoryRow(context, recapEvidence.session.repositoryId),
-      );
-      const values = [context.workspace.id, context.user.id, context.workspace.generation, id];
-      const totalNoteCount = integer(
-        this.one(
-          `SELECT count(*) AS count FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.session_id=?`,
-          ...values,
-        ) ?? {},
-        'count',
-      );
-      const selectedNotes = this.rows(
-        `SELECT n.* FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.session_id=? ORDER BY n.ordinal DESC LIMIT 10`,
+    return this.transaction(() => this.sessionHandoverEvidence(context, id), 'read');
+  }
+  /** The caller owns the transaction so explicit synthesis keeps one atomic input snapshot. */
+  private sessionHandoverEvidence(context: LocalContext, id: string): SessionHandoverEvidence {
+    const recapEvidence = this.sessionRecapEvidence(context, id);
+    const repository = this.repositoryDto(
+      this.repositoryRow(context, recapEvidence.session.repositoryId),
+    );
+    const values = [context.workspace.id, context.user.id, context.workspace.generation, id];
+    const totalNoteCount = integer(
+      this.one(
+        `SELECT count(*) AS count FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.session_id=?`,
         ...values,
-      ).reverse();
-      const notes = selectedNotes.map((row) => this.sessionNoteDto(row));
-      const events = new Map(recapEvidence.events.map((event) => [event.eventId, event]));
-      const invalidEvidence = () =>
-        new DomainError(
-          'INVALID_HANDOVER_EVIDENCE',
-          'The investigation evidence is inconsistent and cannot be exported.',
-          500,
-        );
-      if (events.size !== recapEvidence.events.length) throw invalidEvidence();
-      for (const note of notes) {
-        if (
-          note.sessionId !== id ||
-          note.repositoryId !== repository.id ||
-          note.sources.length > 10 ||
-          new Set(note.sources.map((source) => source.id)).size !== note.sources.length
-        )
-          throw invalidEvidence();
-        for (const source of note.sources) {
-          if (source.repositoryId !== repository.id || !uuid.test(source.id))
-            throw invalidEvidence();
-          const cached = events.get(source.id);
-          const row = this.one(
-            `${cached ? 'SELECT sequence' : 'SELECT payload_json,sequence'} FROM local_events WHERE id=? AND workspace_id=? AND repository_id=? AND session_id=?`,
-            source.id,
-            context.workspace.id,
-            repository.id,
-            id,
-          );
-          if (!row) throw invalidEvidence();
-          const event = cached ?? parse<CapturedEvent>(row['payload_json']);
-          if (
-            event.eventId !== source.id ||
-            event.repositoryId !== repository.id ||
-            event.sessionId !== id ||
-            !Number.isSafeInteger(event.sequence) ||
-            event.sequence < 1 ||
-            event.sequence !== integer(row, 'sequence')
-          )
-            throw invalidEvidence();
-          events.set(event.eventId, event);
-        }
-      }
-      const ordered = [...events.values()].sort((left, right) => left.sequence - right.sequence);
+      ) ?? {},
+      'count',
+    );
+    const selectedNotes = this.rows(
+      `SELECT n.* FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.session_id=? ORDER BY n.ordinal DESC LIMIT 10`,
+      ...values,
+    ).reverse();
+    const notes = selectedNotes.map((row) => this.sessionNoteDto(row));
+    const events = new Map(recapEvidence.events.map((event) => [event.eventId, event]));
+    const invalidEvidence = () =>
+      new DomainError(
+        'INVALID_HANDOVER_EVIDENCE',
+        'The investigation evidence is inconsistent and cannot be exported.',
+        500,
+      );
+    if (events.size !== recapEvidence.events.length) throw invalidEvidence();
+    for (const note of notes) {
       if (
-        ordered.length > 140 ||
-        ordered.length > recapEvidence.totalEventCount ||
-        ordered.some(
-          (event, index) =>
-            event.sessionId !== id ||
-            event.repositoryId !== repository.id ||
-            !Number.isSafeInteger(event.sequence) ||
-            event.sequence < 1 ||
-            !uuid.test(event.eventId) ||
-            (index > 0 && event.sequence <= ordered[index - 1]!.sequence),
-        )
+        note.sessionId !== id ||
+        note.repositoryId !== repository.id ||
+        note.sources.length > 10 ||
+        new Set(note.sources.map((source) => source.id)).size !== note.sources.length
       )
         throw invalidEvidence();
-      return {
-        repository,
-        recapEvidence,
-        notes,
-        totalNoteCount,
-        events: ordered,
-        totalEventCount: recapEvidence.totalEventCount,
-      };
-    }, 'read');
+      for (const source of note.sources) {
+        if (source.repositoryId !== repository.id || !uuid.test(source.id)) throw invalidEvidence();
+        const cached = events.get(source.id);
+        const row = this.one(
+          `${cached ? 'SELECT sequence' : 'SELECT payload_json,sequence'} FROM local_events WHERE id=? AND workspace_id=? AND repository_id=? AND session_id=?`,
+          source.id,
+          context.workspace.id,
+          repository.id,
+          id,
+        );
+        if (!row) throw invalidEvidence();
+        const event = cached ?? parse<CapturedEvent>(row['payload_json']);
+        if (
+          event.eventId !== source.id ||
+          event.repositoryId !== repository.id ||
+          event.sessionId !== id ||
+          !Number.isSafeInteger(event.sequence) ||
+          event.sequence < 1 ||
+          event.sequence !== integer(row, 'sequence')
+        )
+          throw invalidEvidence();
+        events.set(event.eventId, event);
+      }
+    }
+    const ordered = [...events.values()].sort((left, right) => left.sequence - right.sequence);
+    if (
+      ordered.length > 140 ||
+      ordered.length > recapEvidence.totalEventCount ||
+      ordered.some(
+        (event, index) =>
+          event.sessionId !== id ||
+          event.repositoryId !== repository.id ||
+          !Number.isSafeInteger(event.sequence) ||
+          event.sequence < 1 ||
+          !uuid.test(event.eventId) ||
+          (index > 0 && event.sequence <= ordered[index - 1]!.sequence),
+      )
+    )
+      throw invalidEvidence();
+    return {
+      repository,
+      recapEvidence,
+      notes,
+      totalNoteCount,
+      events: ordered,
+      totalEventCount: recapEvidence.totalEventCount,
+    };
+  }
+  getSessionSynthesisPreview(
+    context: LocalContext,
+    sessionId: string,
+    configuration: SessionSynthesisConfiguration | null,
+  ) {
+    return this.sessionSyntheses.preview(context, sessionId, configuration);
+  }
+  requestSessionSynthesis(
+    context: LocalContext,
+    sessionId: string,
+    input: CreateSessionSynthesis,
+    configuration: SessionSynthesisConfiguration | null,
+  ) {
+    return this.sessionSyntheses.request(context, sessionId, input, configuration);
+  }
+  getSessionSynthesis(
+    context: LocalContext,
+    sessionId: string,
+    configuration: SessionSynthesisConfiguration | null,
+    requestId?: string,
+  ) {
+    return this.sessionSyntheses.get(context, sessionId, configuration, requestId);
+  }
+  claimSessionSynthesis(configuration: SessionSynthesisConfiguration | null) {
+    return this.sessionSyntheses.claim(configuration);
+  }
+  completeSessionSynthesis(job: SessionSynthesisJob, analysis: SessionSynthesisAnalysis) {
+    return this.sessionSyntheses.complete(job, analysis);
+  }
+  failSessionSynthesis(job: SessionSynthesisJob): void {
+    this.sessionSyntheses.fail(job);
   }
   private sessionNoteRow(context: LocalContext, id: string): Row {
     this.requireContext(context);
@@ -1771,6 +1821,11 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     this.transaction(() => {
       this.sessionRow(context, id);
       this.run(
+        'DELETE FROM local_session_syntheses WHERE workspace_id=? AND session_id=?',
+        context.workspace.id,
+        id,
+      );
+      this.run(
         'DELETE FROM local_session_notes WHERE workspace_id=? AND session_id=?',
         context.workspace.id,
         id,
@@ -1790,6 +1845,11 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   deleteRepository(context: LocalContext, id: string): void {
     this.transaction(() => {
       this.repositoryRow(context, id);
+      this.run(
+        'DELETE FROM local_session_syntheses WHERE workspace_id=? AND repository_id=?',
+        context.workspace.id,
+        id,
+      );
       this.run(
         'DELETE FROM local_session_notes WHERE workspace_id=? AND repository_id=?',
         context.workspace.id,
@@ -1821,6 +1881,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   deleteWorkspace(context: LocalContext): void {
     this.transaction(() => {
       this.requireContext(context);
+      this.run('DELETE FROM local_session_syntheses WHERE workspace_id=?', context.workspace.id);
       this.run('DELETE FROM local_session_notes WHERE workspace_id=?', context.workspace.id);
       this.run(
         'DELETE FROM local_github_oauth_attempts WHERE workspace_id=?',

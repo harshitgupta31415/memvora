@@ -1,5 +1,5 @@
 /** Local MVP storage. Future PostgreSQL migrations are a separate reviewed adapter. */
-export const LOCAL_SQLITE_SCHEMA_VERSION = 8;
+export const LOCAL_SQLITE_SCHEMA_VERSION = 9;
 export const localSchemaSql = `
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
@@ -244,4 +244,37 @@ CREATE VIRTUAL TABLE IF NOT EXISTS local_event_fts USING fts5(event_id UNINDEXED
 CREATE TRIGGER IF NOT EXISTS local_event_fts_delete AFTER DELETE ON local_event_intakes BEGIN
   DELETE FROM local_event_fts WHERE rowid=old.id;
 END;
+`;
+
+/** Version 9 stores explicit, one-attempt session analyses separately from event enrichment. */
+export const localSessionSynthesisMigrationSql = `
+CREATE TABLE IF NOT EXISTS local_session_syntheses (
+  ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  workspace_id TEXT NOT NULL REFERENCES local_workspaces(id),
+  user_id TEXT NOT NULL,
+  repository_id TEXT NOT NULL REFERENCES local_repositories(id),
+  session_id TEXT NOT NULL REFERENCES local_sessions(id),
+  workspace_generation INTEGER NOT NULL,
+  repository_generation INTEGER NOT NULL,
+  session_generation INTEGER NOT NULL,
+  revision_json TEXT NOT NULL,
+  input_hash TEXT NOT NULL,
+  input_json TEXT NOT NULL CHECK(length(CAST(input_json AS BLOB)) <= 65536),
+  sources_json TEXT NOT NULL,
+  configuration_json TEXT NOT NULL,
+  configuration_fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('queued','running','ready','failed','superseded')),
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 1),
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  lease_token TEXT,
+  lease_until TEXT,
+  failure_code TEXT CHECK(failure_code IN ('PROVIDER_FAILED','INTERRUPTED','INPUT_CHANGED','CONFIGURATION_CHANGED')),
+  analysis_json TEXT
+) STRICT;
+CREATE INDEX IF NOT EXISTS local_session_syntheses_scope ON local_session_syntheses(workspace_id,session_id,ordinal DESC);
+CREATE INDEX IF NOT EXISTS local_session_syntheses_queue ON local_session_syntheses(status,ordinal);
+CREATE UNIQUE INDEX IF NOT EXISTS local_session_syntheses_active ON local_session_syntheses(workspace_id,session_id) WHERE status IN ('queued','running');
 `;

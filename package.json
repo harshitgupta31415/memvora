@@ -39,6 +39,7 @@
     "acceptance:history": "node scripts/acceptance-history.mjs",
     "acceptance:recap": "node scripts/acceptance-recap.mjs",
     "acceptance:journal": "node scripts/acceptance-journal.mjs",
+    "acceptance:synthesis": "node scripts/acceptance-synthesis.mjs",
     "acceptance:directory": "node scripts/acceptance-directory.mjs",
     "acceptance:setup": "node scripts/acceptance-setup.mjs",
     "backup:local": "node --env-file-if-exists=.env scripts/backup-local.mjs",

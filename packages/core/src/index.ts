@@ -3,6 +3,8 @@ import type { SystemStatus } from '@memvora/contracts';
 export * from './local-service.js';
 export * from './github-connection.js';
 export * from './client-runtime.js';
+export * from './session-synthesis-types.js';
+export * from './session-synthesis.js';
 
 /** Domain boundaries, not independently deployed services. */
 export const moduleNames = ['identity', 'github', 'capture', 'memory', 'retrieval'] as const;

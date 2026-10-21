@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 declare const __MEMVORA_PORTABLE_CLIENT__: boolean;
 
-export const CLIENT_VERSION = '0.4.0';
+export const CLIENT_VERSION = '0.5.0';
 export const IS_PORTABLE_CLIENT =
   typeof __MEMVORA_PORTABLE_CLIENT__ !== 'undefined' && __MEMVORA_PORTABLE_CLIENT__ === true;
 

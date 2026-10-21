@@ -32,6 +32,7 @@ import type {
 import { clipRepositorySourceMatch } from './source-excerpts.js';
 import { sessionNoteCitation } from './session-notes.js';
 import type { GitHubConnectionStore } from './github-connection.js';
+import type { SessionSynthesisStore } from './session-synthesis-types.js';
 
 export const captureLimits = {
   batchEvents: 50,
@@ -77,7 +78,7 @@ export type EnrichmentJob = {
   attempts: number;
 };
 /** The adapter must apply scope predicates inside every read and atomic write. */
-export interface LocalEvidenceStore extends GitHubConnectionStore {
+export interface LocalEvidenceStore extends GitHubConnectionStore, SessionSynthesisStore {
   readonly path: string;
   context(): LocalContext;
   repositories(context: LocalContext): Repository[];

@@ -349,7 +349,7 @@ describe('raw evidence recall independent of enrichment', () => {
       legacy.close();
     }
     const upgraded = open(file);
-    expect(database(upgraded).prepare('PRAGMA user_version').get()?.['user_version']).toBe(8);
+    expect(database(upgraded).prepare('PRAGMA user_version').get()?.['user_version']).toBe(9);
     expect(retainedState(upgraded)).toEqual(before);
     expect(
       database(upgraded).prepare('SELECT count(*) AS count FROM local_event_fts').get()?.['count'],

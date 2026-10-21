@@ -151,7 +151,7 @@ describe('local same-instance SQLite snapshots', () => {
     const legacy = new DatabaseSync(source);
     try {
       legacy.exec(
-        'DROP TRIGGER local_event_fts_delete; DROP TABLE local_event_fts; PRAGMA user_version=7;',
+        'DROP TABLE local_session_syntheses; DROP TRIGGER local_event_fts_delete; DROP TABLE local_event_fts; PRAGMA user_version=7;',
       );
     } finally {
       legacy.close();
@@ -174,6 +174,13 @@ describe('local same-instance SQLite snapshots', () => {
 
   it('validates schema-8 raw-index membership and the manifest database version', async () => {
     const f = fixture();
+    // Keep an actual older schema8 copy verifiable without opening the migrating store.
+    const legacy = new DatabaseSync(join(f.dataDirectory, 'server.sqlite'));
+    try {
+      legacy.exec('DROP TABLE local_session_syntheses; PRAGMA user_version=8;');
+    } finally {
+      legacy.close();
+    }
     const result = await createLocalBackup({
       dataDirectory: f.dataDirectory,
       outputDirectory: f.outputDirectory,
@@ -207,6 +214,95 @@ describe('local same-instance SQLite snapshots', () => {
     await expect(verifyLocalBackup(f.outputDirectory)).rejects.toMatchObject({
       code: 'BACKUP_INVALID',
     });
+  });
+
+  it('preserves schema-9 synthesis input, lease and results without changing the manifest count contract', async () => {
+    const f = fixture();
+    const configuration = {
+      provider: 'synthetic-backup-provider',
+      model: 'synthetic-analysis',
+      fingerprint: 'c'.repeat(64),
+      promptVersion: 'session-analysis-v1' as const,
+    };
+    const preview = f.store.getSessionSynthesisPreview(f.context, f.session.id, configuration);
+    const ready = f.store.requestSessionSynthesis(
+      f.context,
+      f.session.id,
+      {
+        requestId: randomUUID(),
+        expectedInputHash: preview.inputHash!,
+      },
+      configuration,
+    );
+    const job = f.store.claimSessionSynthesis(configuration)!;
+    const analysis = {
+      overview: { text: 'A synthetic cited analysis.', sourceIds: [f.events[0]!.eventId] },
+      hypotheses: [],
+      unresolvedQuestions: [],
+      suggestedChecks: [],
+      uncertainty: ['Synthetic evidence is limited.'],
+    };
+    expect(f.store.completeSessionSynthesis(job, analysis)).toBe(true);
+    const running = f.store.requestSessionSynthesis(
+      f.context,
+      f.session.id,
+      {
+        requestId: randomUUID(),
+        expectedInputHash: preview.inputHash!,
+      },
+      configuration,
+    );
+    const active = f.store.claimSessionSynthesis(configuration)!;
+    const before = readDatabase(join(f.dataDirectory, 'server.sqlite'), (database) =>
+      database.prepare('SELECT * FROM local_session_syntheses ORDER BY ordinal').all(),
+    );
+    const result = await createLocalBackup({
+      dataDirectory: f.dataDirectory,
+      outputDirectory: f.outputDirectory,
+    });
+    expect(result.manifest.database.schemaVersion).toBe(9);
+    expect(Object.keys(result.manifest.counts).sort()).toEqual(
+      [
+        'repositories',
+        'sessions',
+        'events',
+        'memories',
+        'notes',
+        'repositorySources',
+        'jobs',
+        'eventIntakes',
+        'deletedWorkspaces',
+        'deletedRepositories',
+        'deletedSessions',
+      ].sort(),
+    );
+    expect(await verifyLocalBackup(f.outputDirectory)).toEqual(result.manifest);
+    const snapshot = join(f.outputDirectory, 'server.sqlite');
+    expect(
+      readDatabase(snapshot, (database) =>
+        database.prepare('SELECT * FROM local_session_syntheses ORDER BY ordinal').all(),
+      ),
+    ).toEqual(before);
+    const report = JSON.stringify(result.manifest);
+    expect(report).not.toContain(active.leaseToken);
+    expect(report).not.toContain(ready.request.id);
+    expect(report).not.toContain(running.request.id);
+    const rehearsal = join(f.root, 'synthesis-rehearsal.sqlite');
+    copyFileSync(snapshot, rehearsal);
+    const reopened = new SqliteEvidenceStore(rehearsal);
+    stores.push(reopened);
+    expect(
+      reopened.getSessionSynthesis(f.context, f.session.id, configuration, ready.request.id).request
+        ?.analysis,
+    ).toEqual(analysis);
+    expect(reopened.completeSessionSynthesis(active, analysis)).toBe(true);
+    expect(
+      readDatabase(snapshot, (database) =>
+        database
+          .prepare('SELECT status FROM local_session_syntheses WHERE id=?')
+          .get(running.request.id),
+      ),
+    ).toMatchObject({ status: 'running' });
   });
 
   it('captures committed WAL evidence and private state without changing the live database or copying external credentials', async () => {
@@ -366,7 +462,7 @@ describe('local same-instance SQLite snapshots', () => {
     const future = join(f.root, 'future');
     mkdirSync(future);
     const database = new DatabaseSync(join(future, 'server.sqlite'));
-    database.exec('PRAGMA user_version=9');
+    database.exec('PRAGMA user_version=10');
     database.close();
     const before = readFileSync(join(future, 'server.sqlite'));
     await expect(

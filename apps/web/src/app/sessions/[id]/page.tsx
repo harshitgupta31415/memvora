@@ -217,6 +217,14 @@ export default async function Investigation({
           action={
             <div className="repository-actions">
               <Link
+                href={`/sessions/${encodeURIComponent(session.id)}/synthesis`}
+                className="button button-small button-ghost"
+                prefetch={false}
+              >
+                <Icon name="spark" size={13} />
+                AI interpretation
+              </Link>
+              <Link
                 href={`/sessions/${encodeURIComponent(session.id)}/handover`}
                 className="button button-small"
                 prefetch={false}

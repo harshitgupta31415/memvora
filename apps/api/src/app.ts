@@ -9,6 +9,7 @@ import {
   CreateRepositorySchema,
   CreateSessionSchema,
   CreateSessionNoteSchema,
+  CreateSessionSynthesisSchema,
   DashboardSchema,
   DeleteConfirmationSchema,
   DeleteResponseSchema,
@@ -37,6 +38,8 @@ import {
   SessionNotesQuerySchema,
   SessionNoteSearchResponseSchema,
   SessionRecapSchema,
+  SessionSynthesisPreviewSchema,
+  SessionSynthesisResponseSchema,
   SessionHandoverSchema,
   SessionHandoverDownloadSchema,
   SessionHandoverDownloadQuerySchema,
@@ -59,8 +62,9 @@ import {
   LocalMemvora,
   observedLabel,
   runEnrichmentOnce,
+  runSessionSynthesisOnce,
 } from '@memvora/core';
-import type { EvidenceEnricher, LocalEvidenceStore } from '@memvora/core';
+import type { EvidenceEnricher, LocalEvidenceStore, SessionSynthesizer } from '@memvora/core';
 
 const immutableEventBatch = Compile(EventBatchSchema);
 const localHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
@@ -101,6 +105,7 @@ export type AppOptions = {
   token?: string;
   embeddedWorker?: boolean;
   enricher?: EvidenceEnricher;
+  synthesis?: SessionSynthesizer;
   registerIntegrations?: (app: FastifyInstance, service: LocalMemvora) => void;
 };
 
@@ -273,6 +278,65 @@ export function buildApp(options: AppOptions = {}) {
     { schema: { body: CreateSessionSchema, response: { 201: SessionResponseSchema } } },
     async (request, reply) =>
       reply.code(201).send({ session: store.createSession(service.context(), request.body) }),
+  );
+  app.get(
+    '/v1/sessions/:id/synthesis/preview',
+    {
+      schema: {
+        params: idParams,
+        querystring: Type.Object({}, { additionalProperties: false }),
+        response: { 200: SessionSynthesisPreviewSchema },
+      },
+    },
+    async (request) =>
+      store.getSessionSynthesisPreview(
+        service.context(),
+        request.params.id,
+        options.synthesis?.configuration ?? null,
+      ),
+  );
+  app.get(
+    '/v1/sessions/:id/synthesis',
+    {
+      schema: {
+        params: idParams,
+        querystring: Type.Object(
+          { requestId: Type.Optional(IdSchema) },
+          { additionalProperties: false },
+        ),
+        response: { 200: SessionSynthesisResponseSchema },
+      },
+    },
+    async (request) =>
+      store.getSessionSynthesis(
+        service.context(),
+        request.params.id,
+        options.synthesis?.configuration ?? null,
+        request.query.requestId,
+      ),
+  );
+  app.post(
+    '/v1/sessions/:id/synthesis',
+    {
+      schema: {
+        params: idParams,
+        querystring: Type.Object({}, { additionalProperties: false }),
+        body: CreateSessionSynthesisSchema,
+        response: { 200: SessionSynthesisResponseSchema, 202: SessionSynthesisResponseSchema },
+      },
+    },
+    async (request, reply) => {
+      const configuration = options.synthesis?.configuration ?? null;
+      const result = store.requestSessionSynthesis(
+        service.context(),
+        request.params.id,
+        request.body,
+        configuration,
+      );
+      return reply
+        .code(result.created ? 202 : 200)
+        .send({ sessionId: request.params.id, configuration, request: result.request });
+    },
   );
   app.get(
     '/v1/sessions/:id',
@@ -527,12 +591,21 @@ export function buildApp(options: AppOptions = {}) {
   options.registerIntegrations?.(app as unknown as FastifyInstance, service);
   let timer: ReturnType<typeof setInterval> | undefined;
   let busy = false;
+  let preferSynthesis = true;
   if (options.embeddedWorker ?? true)
     app.addHook('onReady', async () => {
       timer = setInterval(() => {
         if (busy) return;
         busy = true;
-        void runEnrichmentOnce(store, options.enricher)
+        const synthesisFirst = preferSynthesis;
+        preferSynthesis = !preferSynthesis;
+        void (async () => {
+          if (synthesisFirst) {
+            if (!(await runSessionSynthesisOnce(store, options.synthesis)))
+              await runEnrichmentOnce(store, options.enricher);
+          } else if (!(await runEnrichmentOnce(store, options.enricher)))
+            await runSessionSynthesisOnce(store, options.synthesis);
+        })()
           .catch(() => {
             app.log.warn({ code: 'WORKER_POLL_FAILED' }, 'Local enrichment poll failed');
           })

@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./session-synthesis": {
+      "types": "./dist/session-synthesis.d.ts",
+      "default": "./dist/session-synthesis.js"
     }
   },
   "scripts": {

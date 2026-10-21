@@ -21,6 +21,13 @@ import { readExistingOutboxPage } from './outbox-inspection.js';
 import { resolveSyncFilter, synchronizeOutbox } from './outbox-sync.js';
 import { formatSessionRecap, readSessionRecap } from './session-recap.js';
 import {
+  prepareSynthesisRequest,
+  readSessionSynthesis,
+  readSynthesisPreview,
+  submitSessionSynthesis,
+  synthesisRetryMessage,
+} from './session-synthesis.js';
+import {
   readSessionDirectory,
   resolveSessionDirectoryRequest,
   type SessionListOptions,
@@ -302,6 +309,64 @@ session
     const { origin, token } = connection(binding);
     const result = await readSessionRecap(origin, token, sessionId);
     console.log(options.json ? JSON.stringify(result, null, 2) : formatSessionRecap(result));
+  });
+
+session
+  .command('synthesis-preview [id]')
+  .description(
+    'Read provider, model, bounded input coverage and hash before explicitly requesting AI interpretation.',
+  )
+  .action(async (id: string | undefined) => {
+    const binding = id ? undefined : bound().binding;
+    const sessionId = id ?? binding?.sessionId;
+    if (!Check(IdSchema, sessionId)) throw new Error('An authorized session UUID is required.');
+    const { origin, token } = connection(binding);
+    console.log(JSON.stringify(await readSynthesisPreview(origin, token, sessionId), null, 2));
+  });
+
+session
+  .command('synthesis [id]')
+  .description('Read existing AI interpretation and processing status; never requests model work.')
+  .option('--request-id <uuid>', 'Read one original request instead of the latest request')
+  .action(async (id: string | undefined, options: { requestId?: string }) => {
+    if (options.requestId !== undefined && !Check(IdSchema, options.requestId))
+      throw new Error('Use a UUID --request-id.');
+    const binding = id ? undefined : bound().binding;
+    const sessionId = id ?? binding?.sessionId;
+    if (!Check(IdSchema, sessionId)) throw new Error('An authorized session UUID is required.');
+    const { origin, token } = connection(binding);
+    const value = await readSessionSynthesis(origin, token, sessionId, options.requestId);
+    console.error(
+      'AI interpretation — unverified. Read-only status; no provider work requested. Stale results describe an earlier input or configuration.',
+    );
+    console.log(JSON.stringify(value, null, 2));
+  });
+
+session
+  .command('synthesize [id]')
+  .description(
+    'Explicitly request optional AI interpretation for the input hash you reviewed; may send bounded evidence to the configured provider.',
+  )
+  .requiredOption('--input-hash <hash>', 'Input hash returned by synthesis-preview')
+  .option('--request-id <uuid>', 'Reuse the original UUID after an uncertain submission')
+  .action(async (id: string | undefined, options: { inputHash: string; requestId?: string }) => {
+    if (id !== undefined && !Check(IdSchema, id))
+      throw new Error('An authorized session UUID is required.');
+    const input = prepareSynthesisRequest(options.inputHash, options.requestId);
+    const binding = id ? undefined : bound().binding;
+    const sessionId = id ?? binding?.sessionId;
+    if (!Check(IdSchema, sessionId)) throw new Error('An authorized session UUID is required.');
+    console.error(
+      `Synthesis request ID: ${input.requestId}\nReviewed input hash: ${input.expectedInputHash}`,
+    );
+    try {
+      const { origin, token } = connection(binding);
+      console.log(
+        JSON.stringify(await submitSessionSynthesis(origin, token, sessionId, input), null, 2),
+      );
+    } catch {
+      throw new Error(synthesisRetryMessage(sessionId, input));
+    }
   });
 
 session

@@ -15,7 +15,7 @@ Read-only MCP adapter ---+                    |
 
 The web server, CLI and MCP share runtime response contracts and the same local API. They do not open the server evidence database directly. The CLI has its own SQLite outbox for offline durability. The API ordinarily runs the local background processor, one job at a time; a separate worker executable is also present. There is no need to start it for the default development flow.
 
-CLI and MCP version 0.4.0 can also be installed together from a private local tarball without this source checkout. Follow [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md) for Node requirements, isolated installation, explicit server credentials, upgrades and removal. The API and website remain separate processes; source-development commands below retain their existing fallback paths.
+CLI and MCP version 0.5.0 can also be installed together from a private local tarball without this source checkout. Follow [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md) for Node requirements, isolated installation, explicit server credentials, upgrades and removal. The API and website remain separate processes; source-development commands below retain their existing fallback paths.
 
 Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. Lexical recall also searches the latest imported redacted code snapshot and returns immutable file citations. The optional provider path is separate and remains disabled unless explicitly configured.
 
@@ -29,7 +29,7 @@ When no stored summary exists, recall returns an observed projection with `repre
 
 If a stored summary exists, it takes precedence, including when only the original output or diff matched. Raw and summary hits deduplicate by event UUID before applying the result limit. Repository/session scope and deletion checks apply to search and detail. Displayed output is bounded; follow the original event link at `/events/[id]` for the full retained capture, which can itself have capture truncation. A failed command or later passing command alone does not establish a causal fix. Ask still composes a cited answer from retrieved evidence rather than performing cross-event AI reasoning.
 
-The normal application store upgrades to schema 8 and backfills its raw-evidence index from accepted events. For a recovery point before an upgrade, use [BACKUPS.md](BACKUPS.md); its operator supports schema 7 or 8 without upgrading the source. Implementation instructions and acceptance results remain separate; see [STATUS.md](STATUS.md).
+The normal application store upgrades to schema 9, including the schema 8 raw-evidence backfill and independent synthesis request storage. For a recovery point before an upgrade, use [BACKUPS.md](BACKUPS.md); its operator supports schemas 7, 8 and 9 without upgrading the source. Implementation instructions and acceptance results remain separate; see [STATUS.md](STATUS.md).
 
 Long questions retain up to 64 distinct useful literals within the 2,000-character limit across command, file and note search. Use distinctive error text for dense or ambiguous questions; matching remains lexical. Ask reserves matching commands before nearby context and discloses any omitted events or shortened steps within its ten-command/three-investigation/30-step budget. [RETRIEVAL_EVALUATION.md](RETRIEVAL_EVALUATION.md) documents the reproducible synthetic corpus; it does not replace actual developer relevance judgments or real-provider evaluation.
 
@@ -75,7 +75,11 @@ node apps/cli/dist/index.js session recap <session-id>
 node apps/cli/dist/index.js session recap <session-id> --json
 ```
 
-With a bound local capture, omit the ID to read its current investigation. An explicit ID uses the shared local connection without requiring a capture binding in the current directory. MCP tool `get_session_recap` accepts `{ "id": "<session-id>" }`, returns cited observed steps and disclosed coverage, and never executes the recorded commands. This is a deterministic investigation recap; the optional AI adapter remains separate per-command enrichment.
+With a bound local capture, omit the ID to read its current investigation. An explicit ID uses the shared local connection without requiring a capture binding in the current directory. MCP tool `get_session_recap` accepts `{ "id": "<session-id>" }`, returns cited observed steps and disclosed coverage, and never executes the recorded commands. This remains a deterministic investigation recap; optional per-command enrichment and investigation interpretation are separate flows.
+
+### Explicit investigation interpretation
+
+Open **AI interpretation** from an investigation to review provider/model, bounded coverage and the input hash, then explicitly request a cited interpretation. Reads never call a model. Requests retain a stable UUID/hash, allow one provider attempt, and show queued/running/ready/failed/superseded and stale state. New input does not silently regenerate a result. CLI supports `session synthesis-preview`, `session synthesize --input-hash` and `session synthesis`; MCP `get_session_synthesis` only reads results. Enable the independent `MEMVORA_SESSION_SYNTHESIS_ENABLED` flag deliberately with provider settings. See [SESSION_SYNTHESIS.md](SESSION_SYNTHESIS.md) for configuration, retry behavior, input limits and current boundaries.
 
 With the compiled app running and an existing investigation containing at least three commands, `npm run acceptance:recap` checks API, CLI and real MCP agreement against original event UUIDs. It inserts no evidence or answer and verifies the evidence/processing counts remain unchanged. The ignored report is `.memvora/recap-acceptance.json`.
 

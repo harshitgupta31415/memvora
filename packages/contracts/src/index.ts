@@ -3,6 +3,7 @@ import Type from 'typebox';
 export * from './local.js';
 export * from './github.js';
 export * from './session-directory.js';
+export * from './session-synthesis.js';
 
 export const HealthSchema = Type.Object(
   {
