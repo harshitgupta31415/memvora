@@ -15,7 +15,13 @@ import {
 import { Check } from 'typebox/value';
 import { apiRequest } from './local.js';
 
-export type NoteOptions = { text?: string; kind?: string; event?: string[]; noteId?: string };
+export type NoteOptions = {
+  text?: string;
+  kind?: string;
+  event?: string[];
+  noteId?: string;
+  queue?: boolean;
+};
 
 export function collectNoteEvent(value: string, previous: string[]): string[] {
   return [...previous, value];

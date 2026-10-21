@@ -86,6 +86,14 @@ Ask includes at most five matching notes, or the latest five from the selected r
 
 The website's journal form keeps the same UUID and draft after an uncertain save, and starts a fresh identity after edits. Its same-origin BFF preserves backend 201/200 status without returning the local bearer token. CLI `session note [id] --text ... --kind ... --event <uuid> --note-id <retry-uuid>` writes reports; `session notes [id] --limit ... --before ...` reads pages. CLI failures expose the stable retry UUID rather than the submitted body. MCP `search_session_notes`, `get_session_note` and `get_session_notes` preserve member/citation/navigation identity within a 96 KiB transport budget, shortening bodies only with explicit disclosure.
 
+### Local authored-note queue
+
+CLI `session note --queue` is an opt-in local operation for the current bound investigation. It normalizes and redacts the authored request before retaining its original UUID, kind, body and sorted event IDs in a separate repository-local journal outbox. It does not invoke an API route or read credentials. `journal list` returns offline metadata; `journal retry --note <UUID>` deliberately submits one retained request through the existing journal POST route. Ordinary direct note submission and command capture/sync retain their existing behavior.
+
+Before sending saved text, retry verifies the pinned API origin/repository, authenticates with `GET /v1/me`, verifies the selected investigation through the bounded event-page read, and durably pins user/workspace/generation before its first POST. Later retries must match that principal. An acknowledgement must match the original UUID, repository/session, canonical body/kind, authenticated author and every event citation before the local row becomes synced. Uncertain responses, conflicts and unavailable parents retain the original local request; they do not rewrite it, omit citations or create a replacement identity. A later investigation binding in the same repository does not prevent retrying an older queued investigation.
+
+There is no new server route, server database migration, background note uploader or MCP write tool. Local queue time is separate from the server-derived acceptance/creation time. Synced means a previously validated acknowledgement, not proof that the server still retains the record after deletion. See [JOURNAL_RECOVERY.md](JOURNAL_RECOVERY.md) for the separate plaintext client-store limits, manual guide and browser-draft limitations.
+
 ## Implemented local investigation recaps
 
 `GET /v1/sessions/:id/recap` returns the shared `SessionRecap` contract after the same local bearer, workspace and repository checks as raw evidence. It accepts no query fields or body. It is a read-only computation: it neither stores a recap nor starts enrichment jobs, and it works while command memories are pending or AI is disabled.

@@ -42,7 +42,7 @@ const token = randomBytes(32).toString('hex');
 const trapToken = `UnrelatedPortableStoreFixture${randomBytes(24).toString('hex')}`;
 const foreignMarker = 'ForeignPackagedClientScopeMustStayPrivate';
 const query = 'MemvoraPackagedClientQXZ9071Error';
-const version = '0.6.0';
+const version = '0.7.0';
 const children = new Set();
 const states = new WeakMap();
 const steps = [];
@@ -730,6 +730,30 @@ try {
   const { session } = store.getSession(store.context(), binding.sessionId);
   assert.equal(session.repositoryId, binding.repositoryId);
   assert.equal(session.eventCount, 0);
+  const queuedJournalId = randomUUID();
+  const queuedJournalBody = 'Synthetic packaged journal report, not a verified resolution.';
+  const requestsBeforeQueue = requests;
+  const queuedJournal = JSON.parse(
+    (
+      await cli(
+        ['session', 'note', '--text', queuedJournalBody, '--note-id', queuedJournalId, '--queue'],
+        { cwd: captureDirectory, env: environment },
+      )
+    ).stdout,
+  );
+  assert.equal(queuedJournal.mode, 'queued_locally');
+  assert.equal(queuedJournal.serverContacted, false);
+  assert.equal(queuedJournal.item.noteId, queuedJournalId);
+  assert.equal(queuedJournal.item.state, 'pending');
+  assert.equal(JSON.stringify(queuedJournal).includes(queuedJournalBody), false);
+  const offlineJournal = JSON.parse(
+    (await cli(['journal', 'list', '--directory', captureDirectory], { env: environment })).stdout,
+  );
+  assert.equal(offlineJournal.readOnly, true);
+  assert.equal(offlineJournal.items[0].noteId, queuedJournalId);
+  assert.equal(offlineJournal.totals.pending, 1);
+  assert.equal(JSON.stringify(offlineJournal).includes(queuedJournalBody), false);
+  assert.equal(requests, requestsBeforeQueue, 'Offline journal queue/list contacted the API.');
   const execution = await cli(
     [
       'run',
@@ -797,6 +821,40 @@ try {
   );
   steps.push(
     'Actual installed CLI captured exit7, retained rejected uploads and selectively retried the same UUID before cited raw Ask.',
+  );
+
+  stage = 'installed journal queue and explicit retry';
+  assert.equal(
+    store.sessionNotes(store.context(), binding.sessionId, {}).totalNotes,
+    0,
+    'Command capture/sync must not automatically upload queued authored notes.',
+  );
+  const journalAccepted = JSON.parse(
+    (
+      await cli(['journal', 'retry', '--note', queuedJournalId], {
+        cwd: captureDirectory,
+        env: configured,
+      })
+    ).stdout,
+  );
+  assert.equal(journalAccepted.mode, 'confirmed');
+  assert.equal(journalAccepted.submissionPerformed, true);
+  assert.equal(journalAccepted.item.state, 'synced');
+  assert.equal(store.getSessionNote(store.context(), queuedJournalId).body, queuedJournalBody);
+  const requestsBeforeAcknowledgedRetry = requests;
+  const journalAcknowledged = JSON.parse(
+    (
+      await cli(['journal', 'retry', '--note', queuedJournalId], {
+        cwd: captureDirectory,
+        env: environment,
+      })
+    ).stdout,
+  );
+  assert.equal(journalAcknowledged.mode, 'already_acknowledged');
+  assert.equal(journalAcknowledged.submissionPerformed, false);
+  assert.equal(requests, requestsBeforeAcknowledgedRetry);
+  steps.push(
+    'Installed journal queued offline, stayed separate from capture sync, retried one original UUID and recognized its exact prior acknowledgement without credential lookup or HTTP.',
   );
 
   stage = 'installed MCP evidence and scope';
@@ -920,6 +978,7 @@ try {
   const retainedPaths = [
     configuration,
     join(captureDirectory, '.memvora', 'outbox.sqlite'),
+    join(captureDirectory, '.memvora', 'journal-outbox.sqlite'),
     join(serverDirectory, 'local-token'),
     join(serverDirectory, 'server.sqlite'),
   ];
