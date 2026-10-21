@@ -22,12 +22,14 @@ import {
 import { MemoryCard } from '@/components/evidence';
 import { CopyCommand } from '@/components/controls';
 import { InvestigationRecap, InvestigationRecapLoading } from '@/components/investigation-recap';
+import { SessionJournal, SessionJournalLoading } from '@/components/session-journal';
 
 export const dynamic = 'force-dynamic';
 
-function timelineHref(id: string, limit: number, cursor?: string): string {
+function timelineHref(id: string, limit: number, cursor?: string, noteBefore?: string): string {
   const query = new URLSearchParams({ limit: String(limit) });
   if (cursor !== undefined) query.set('cursor', cursor);
+  if (noteBefore !== undefined) query.set('noteBefore', noteBefore);
   return `/sessions/${encodeURIComponent(id)}?${query}`;
 }
 
@@ -36,11 +38,13 @@ function TimelinePagination({
   limit,
   page,
   position,
+  noteBefore,
 }: {
   id: string;
   limit: number;
   page: SessionEventsPage['page'];
   position: 'top' | 'bottom';
+  noteBefore: string | undefined;
 }) {
   return (
     <nav
@@ -50,7 +54,7 @@ function TimelinePagination({
       {page.olderCursor ? (
         <Link
           className="button button-small button-ghost"
-          href={timelineHref(id, limit, page.olderCursor)}
+          href={timelineHref(id, limit, page.olderCursor, noteBefore)}
           prefetch={false}
         >
           <Icon name="arrow" size={12} style={{ transform: 'rotate(180deg)' }} />
@@ -69,7 +73,7 @@ function TimelinePagination({
       {page.newerCursor ? (
         <Link
           className="button button-small button-ghost"
-          href={timelineHref(id, limit, page.newerCursor)}
+          href={timelineHref(id, limit, page.newerCursor, noteBefore)}
           prefetch={false}
         >
           Later attempts <Icon name="arrow" size={12} />
@@ -118,7 +122,7 @@ export default async function Investigation({
     ...(parameters.cursor === undefined ? {} : { cursor: parameters.cursor }),
   };
   const unsupportedParameter = Object.keys(parameters).some(
-    (key) => key !== 'limit' && key !== 'cursor',
+    (key) => key !== 'limit' && key !== 'cursor' && key !== 'noteBefore',
   );
   if (unsupportedParameter || !Compile(SessionEventsQuerySchema).Check(candidate))
     return (
@@ -141,12 +145,16 @@ export default async function Investigation({
       </>
     );
   const query = new URLSearchParams({ limit: String(limit) });
+  const noteBefore =
+    typeof parameters.noteBefore === 'string' && Compile(IdSchema).Check(parameters.noteBefore)
+      ? parameters.noteBefore
+      : undefined;
   if (typeof parameters.cursor === 'string') query.set('cursor', parameters.cursor);
   const result = await apiRequest(
     `/v1/sessions/${encodeURIComponent(id)}/events?${query}`,
     SessionEventsPageSchema,
   );
-  const latestHref = timelineHref(id, limit);
+  const latestHref = timelineHref(id, limit, undefined, noteBefore);
   if (!result.ok) {
     if (result.status === 404) notFound();
     return (
@@ -224,6 +232,19 @@ export default async function Investigation({
       <Suspense fallback={<InvestigationRecapLoading />}>
         <InvestigationRecap sessionId={session.id} />
       </Suspense>
+      <Suspense fallback={<SessionJournalLoading />}>
+        <SessionJournal
+          sessionId={session.id}
+          noteBefore={parameters.noteBefore}
+          timelineLimit={limit}
+          timelineCursor={typeof parameters.cursor === 'string' ? parameters.cursor : undefined}
+          commands={events.map((event) => ({
+            eventId: event.eventId,
+            sequence: event.sequence,
+            command: commandPreview(event.command.executable, event.command.args),
+          }))}
+        />
+      </Suspense>
       <section
         className="timeline-snapshot panel section-top"
         aria-labelledby="timeline-snapshot-title"
@@ -245,6 +266,7 @@ export default async function Investigation({
           action={`/sessions/${encodeURIComponent(id)}`}
           className="timeline-page-size"
         >
+          {noteBefore !== undefined && <input type="hidden" name="noteBefore" value={noteBefore} />}
           <label>
             <span>Attempts per page</span>
             <select className="select" name="limit" defaultValue={limit}>
@@ -300,7 +322,13 @@ export default async function Investigation({
               Snapshot: {page.snapshotEventCount}. Current session: {session.eventCount}.
             </span>
           </p>
-          <TimelinePagination id={id} limit={limit} page={page} position="top" />
+          <TimelinePagination
+            id={id}
+            limit={limit}
+            page={page}
+            position="top"
+            noteBefore={noteBefore}
+          />
           {events.length ? (
             <ol className="timeline paginated-timeline">
               {[...events]
@@ -369,7 +397,13 @@ export default async function Investigation({
             />
           )}
           {events.length > 0 && (
-            <TimelinePagination id={id} limit={limit} page={page} position="bottom" />
+            <TimelinePagination
+              id={id}
+              limit={limit}
+              page={page}
+              position="bottom"
+              noteBefore={noteBefore}
+            />
           )}
         </section>
         <aside className="content-stack">

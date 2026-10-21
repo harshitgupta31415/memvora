@@ -21,6 +21,11 @@ memvora session show <authorized-session-uuid> --limit 5
 memvora session show <authorized-session-uuid> --limit 5 --cursor <older-or-newer-cursor>
 memvora session recap
 memvora session recap <authorized-session-uuid> --json
+memvora session note --text "Investigated the startup failure" --kind note
+memvora session note <authorized-session-uuid> --text "Chose this approach after the checks" --kind decision --event <event-uuid> --event <another-event-uuid>
+memvora session note <authorized-session-uuid> --text "Same original text when retrying" --kind resolution --note-id <original-note-uuid>
+memvora session notes
+memvora session notes <authorized-session-uuid> --limit 10 --before <olderBeforeId>
 memvora session end
 ```
 
@@ -42,4 +47,10 @@ Suppressed overlong-line bytes count toward truncation and make capture incomple
 
 `session recap [id]` reads `GET /v1/sessions/:id/recap` through that same protected API and uses the same explicit-ID versus current-binding connection rule as `session show`. It prints a deterministic observed recap: chronological command/outcome citations, bounded output/diff excerpts, coverage, counts and uncertainty. The recap includes all accepted events up to 40; longer investigations include the first 20 and last 20 and explicitly disclose omitted middle events. Counts describe only those included events. Human output further shortens output/diff text and removes terminal controls; `--json` prints the complete runtime-validated bounded recap without raw event payloads. Use `session show` for the remaining retained evidence. A passing command, a nearby diff and session closure do not establish a causal fix.
 
-`ask` prints the API's observed-evidence label, historical steps, source IDs and uncertainty. It does not invent an AI summary or run a recommended fix. Child failure status is preserved where representable. This local CLI is private and has not been published as an npm package.
+`session note [session-id]` submits a user-authored journal entry through the protected API. Supply `--text` (1–4,000 characters), optional `--kind note|decision|resolution` (default `note`) and up to ten unique repeatable `--event` UUIDs. Event links are validated by the server; note authorship comes from the authenticated local identity. Success prints the validated `{note}` response, including its UUID, label and linked event citations. The API normalizes/redacts stored text. A resolution entry records the author's claim and never independently verifies a fix.
+
+The CLI generates a note UUID once before submission. If submission is not confirmed, it reports only a generic failure and that retry UUID, without echoing the body or raw remote error. Retry the **same text, kind and event IDs** with `--note-id <original-uuid>`; an identical accepted retry returns the existing note, while conflicting reuse is rejected. This journal write has no automatic retry or durable local outbox. For a new entry, omit `--note-id` to allocate a new identity.
+
+`session notes [id]` prints a validated JSON page, latest 20 notes by default in chronological order; `--limit` accepts 1–50. Pass `olderBeforeId` unchanged as `--before` with the same session to read earlier notes; null means no older page. Journal pages are live scoped keyset views, separate from the fixed accepted-event snapshots used by `session show`. Both note commands use the explicit/environment/default API connection independently of the folder when a session UUID is supplied, and the bound session otherwise. Ask retains journal citations as user-authored claims with note kind, author and timestamp, distinct from observed event citations and imported code.
+
+`ask` prints the API's evidence label, recalled steps, source IDs and uncertainty. Journal claims remain explicitly user-authored; recorded exits remain observations. It does not invent an AI summary or run a recommended fix. Child failure status is preserved where representable. This local CLI is private and has not been published as an npm package.

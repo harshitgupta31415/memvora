@@ -7,6 +7,7 @@ import {
   AskRequestSchema,
   CreateRepositorySchema,
   CreateSessionSchema,
+  CreateSessionNoteSchema,
   DashboardSchema,
   DeleteConfirmationSchema,
   DeleteResponseSchema,
@@ -30,6 +31,10 @@ import {
   SearchRequestSchema,
   SearchResponseSchema,
   SessionContextSchema,
+  SessionNoteResponseSchema,
+  SessionNotesPageSchema,
+  SessionNotesQuerySchema,
+  SessionNoteSearchResponseSchema,
   SessionRecapSchema,
   SessionEventsPageSchema,
   SessionEventsQuerySchema,
@@ -274,6 +279,45 @@ export function buildApp(options: AppOptions = {}) {
     },
     async (request) =>
       deriveSessionRecap(store.getSessionRecapEvidence(service.context(), request.params.id)),
+  );
+  app.get(
+    '/v1/sessions/:id/notes',
+    {
+      schema: {
+        params: idParams,
+        querystring: SessionNotesQuerySchema,
+        response: { 200: SessionNotesPageSchema },
+      },
+    },
+    async (request) =>
+      store.sessionNotes(service.context(), request.params.id, { ...request.query }),
+  );
+  app.post(
+    '/v1/sessions/:id/notes',
+    {
+      schema: {
+        params: idParams,
+        body: CreateSessionNoteSchema,
+        response: { 200: SessionNoteResponseSchema, 201: SessionNoteResponseSchema },
+      },
+    },
+    async (request, reply) => {
+      const result = store.createSessionNote(service.context(), request.params.id, request.body);
+      return reply.code(result.created ? 201 : 200).send({ note: result.note });
+    },
+  );
+  app.get(
+    '/v1/session-notes/:id',
+    { schema: { params: idParams, response: { 200: SessionNoteResponseSchema } } },
+    async (request) => ({ note: store.getSessionNote(service.context(), request.params.id) }),
+  );
+  app.post(
+    '/v1/session-notes/search',
+    { schema: { body: SearchRequestSchema, response: { 200: SessionNoteSearchResponseSchema } } },
+    async (request) => ({
+      items: store.searchSessionNotes(service.context(), request.body),
+      requestId: request.id,
+    }),
   );
   app.post(
     '/v1/sessions/:id/close',

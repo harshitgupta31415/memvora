@@ -54,6 +54,8 @@ An output artifact or file chunk may share content with another execution. Dedup
 
 Do not change already-uploaded event payloads when adding later human notes or resolving an investigation. Store annotations and outcome updates as separate versioned records. Reused event ID plus changed immutable payload is a conflict, not an update.
 
+The implemented local schema7 journal uses `local_session_notes` for immutable UUID/body/kind/author/time/event-link records with workspace/repository/session generation snapshots and an append ordinal. `local_session_note_fts` indexes only redacted bodies through transactional insert/delete triggers. A note is a user-authored claim, including the `resolution` kind, rather than an observed or independently verified outcome. Each appended entry is a separate immutable authored record; corrections append new entries. Parent deletion removes records and FTS content. This local implementation does not apply or complete the hosted annotation/authentication model above.
+
 ## Local SQLite model
 
 `local_sessions` stores current repo/session binding and next sequence. `local_executions` records started/running/finalized state, metadata and completeness. `local_output_chunks` stores redacted chunks with stream and ordinal. `outbox` stores immutable finalized envelope, payload digest, retry count, next attempt time, last error and state. `local_schema_version` tracks migrations.

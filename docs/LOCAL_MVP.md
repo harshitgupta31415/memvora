@@ -17,6 +17,21 @@ The web server, CLI and MCP share runtime response contracts and the same local 
 
 Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. Lexical recall also searches the latest imported redacted code snapshot and returns immutable file citations. The optional provider path is separate and remains disabled unless explicitly configured.
 
+### Investigation journal
+
+Open an investigation to record a note, decision or reported resolution, optionally linking up to ten captured command IDs from that investigation. Entries keep the local user's author/time, remain separate from raw command evidence and are not independently verified. Report text is normalized and redacted before persistence/search. Existing entries cannot be edited; add a correction as another note. Saving a resolution report does not close the investigation or prove a fix.
+
+The composer preserves its draft and submission UUID after an uncertain response; retry unchanged text to avoid a duplicate entry. Editing the draft starts a new identity. Journal pages have their own earlier/latest navigation and preserve the command timeline's cursor. Original note pages and Ask citations retain attached evidence links. Ask can recover exact note terms or recent journal context, including an investigation with no captured command yet.
+
+```powershell
+node apps/cli/dist/index.js session note <session-id> --kind decision --text "Explain why you chose this approach" --event <event-id>
+node apps/cli/dist/index.js session notes <session-id> --limit 10
+```
+
+Repeat `--event` to attach more commands. After an uncertain CLI write, use the printed `--note-id` with the same text/kind/links. CLI does not automatically retry note writes or add them to the capture outbox. MCP tools `search_session_notes`, `get_session_note` and `get_session_notes` read these reports; they never create one. Parent session/repository/workspace deletion removes notes and their search entries. Browser GitHub connection state does not confer another user's authority to write notes.
+
+`npm run acceptance:journal` launches the compiled website and an isolated in-memory API store. It uses explicitly synthetic command metadata to check journal contracts, browser mutation guards, retries, redaction, CLI, Ask, note pages and actual MCP stdio. It loads no real user evidence and calls no GitHub or AI service; its report is `.memvora/journal-acceptance.json`. Existing real command/source acceptance checks remain separate.
+
 ### Investigation recap
 
 Open an investigation to see a cited recap above its raw timeline. This computation works directly from accepted commands, including when enrichment is pending. It labels zero/nonzero exits, startup failures, interruptions, incomplete outcomes and diff/capture flags without inferring a fix or an engineer's intent. Each ordered step links to original evidence. Counts cover the included selection: all events through 40, otherwise first 20 and last 20 with explicit omitted-middle coverage. The full retained history remains available through timeline pagination. Refresh to include later uploads; the recap is computed on request rather than stored.

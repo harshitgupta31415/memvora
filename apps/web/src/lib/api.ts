@@ -5,7 +5,8 @@ import { headers } from 'next/headers';
 import { Compile } from 'typebox/compile';
 import type { Static, TSchema } from 'typebox';
 
-export type ApiResult<T> = { ok: true; data: T } | { ok: false; message: string; status: number };
+export type ApiResult<T> =
+  { ok: true; data: T; status: number } | { ok: false; message: string; status: number };
 const projectRoot = resolve(process.cwd(), '../..');
 const loopbackNames = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -116,7 +117,7 @@ export async function apiRequest<S extends TSchema>(
         message: 'The API response did not match the expected contract.',
         status: 502,
       };
-    return { ok: true, data: value as Static<S> };
+    return { ok: true, data: value as Static<S>, status: response.status };
   } catch {
     return {
       ok: false,

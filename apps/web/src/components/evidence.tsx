@@ -1,7 +1,9 @@
 import Link from 'next/link';
 import type { Memory, RecallCitation, Repository, Session } from '@memvora/contracts';
+import { noteKindLabel } from '@/lib/note-labels';
 import { Icon } from './icon';
 import { DateLabel, StatusBadge } from './ui';
+import journalStyles from './session-journal.module.css';
 
 export function SessionRow({ session, repository }: { session: Session; repository?: Repository }) {
   return (
@@ -35,6 +37,7 @@ export function SessionRow({ session, repository }: { session: Session; reposito
 
 export function citationHref(source: RecallCitation): string {
   if (source.kind === 'event') return `/events/${encodeURIComponent(source.id)}`;
+  if (source.kind === 'session_note') return `/notes/${encodeURIComponent(source.id)}`;
   const limit = Math.max(1, Math.min(200, source.endLine - source.startLine + 1));
   return `/sources/${encodeURIComponent(source.id)}?${new URLSearchParams({ startLine: String(source.startLine), limit: String(limit) })}`;
 }
@@ -50,6 +53,22 @@ export function SourceLinks({ ids, sources }: { ids: string[]; sources?: RecallC
             <span key={id} className="citation-unavailable">
               Source {index + 1} unavailable
             </span>
+          );
+        if (source?.kind === 'session_note')
+          return (
+            <Link
+              href={citationHref(source)}
+              key={id}
+              className={`citation-link ${journalStyles.noteCitation}`}
+              title={`${noteKindLabel(source.noteKind)} by ${source.authorName}. User-authored, not independently verified.`}
+              prefetch={false}
+            >
+              <Icon name="link" size={10} />
+              <span>
+                Author report {index + 1} (unverified) · {source.authorName} ·{' '}
+                <DateLabel value={source.createdAt} />
+              </span>
+            </Link>
           );
         return (
           <Link
@@ -86,7 +105,16 @@ export function SourceList({ sources }: { sources: RecallCitation[] }) {
           key={`${source.kind}:${source.id}:${source.kind === 'repository_file' ? source.startLine : 0}`}
           className="source-item"
         >
-          <Icon name={source.kind === 'repository_file' ? 'code' : 'terminal'} size={15} />
+          <Icon
+            name={
+              source.kind === 'repository_file'
+                ? 'code'
+                : source.kind === 'session_note'
+                  ? 'link'
+                  : 'terminal'
+            }
+            size={15}
+          />
           <span>
             {source.kind === 'repository_file' ? (
               <>
@@ -100,6 +128,14 @@ export function SourceList({ sources }: { sources: RecallCitation[] }) {
                     : 'Commit not recorded'}{' '}
                   · SHA-256 {source.contentHash.slice(0, 12)}…
                 </span>
+              </>
+            ) : source.kind === 'session_note' ? (
+              <>
+                <strong>{noteKindLabel(source.noteKind)} · author report</strong>
+                <span className="source-caption">
+                  By {source.authorName} · <DateLabel value={source.createdAt} />
+                </span>
+                <span className="source-caption">User-authored — not independently verified</span>
               </>
             ) : (
               <>

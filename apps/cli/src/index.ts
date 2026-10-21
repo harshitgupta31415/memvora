@@ -24,6 +24,16 @@ import {
 } from './local.js';
 import { captureCommand, gitText, recoverIncomplete } from './capture.js';
 import { formatSessionRecap, readSessionRecap } from './session-recap.js';
+import {
+  collectNoteEvent,
+  formatRecallCitation,
+  noteRetryError,
+  prepareSessionNote,
+  readSessionNotes,
+  sessionNotesQuery,
+  submitSessionNote,
+  type NoteOptions,
+} from './session-notes.js';
 
 const program = new Command()
   .name('memvora')
@@ -254,6 +264,52 @@ session
     console.log(options.json ? JSON.stringify(result, null, 2) : formatSessionRecap(result));
   });
 
+session
+  .command('note [session-id]')
+  .description('Add an explicitly user-authored note, decision or resolution claim.')
+  .requiredOption('--text <body>', 'User-authored journal text, up to 4000 characters')
+  .option(
+    '--kind <kind>',
+    'note, decision or resolution; none independently verifies a fix',
+    'note',
+  )
+  .option(
+    '--event <uuid>',
+    'Link a captured event UUID; repeat up to ten times',
+    collectNoteEvent,
+    [],
+  )
+  .option('--note-id <uuid>', 'Reuse this note UUID when retrying the same submission')
+  .action(async (id: string | undefined, options: NoteOptions) => {
+    if (id !== undefined && !Check(IdSchema, id))
+      throw new Error('An authorized session UUID is required.');
+    const input = prepareSessionNote(options);
+    try {
+      const binding = id ? undefined : bound().binding;
+      const sessionId = id ?? binding?.sessionId;
+      if (!Check(IdSchema, sessionId)) throw new Error('An authorized session UUID is required.');
+      const { origin, token } = connection(binding);
+      const result = await submitSessionNote(origin, token, sessionId, input);
+      console.log(JSON.stringify(result, null, 2));
+    } catch {
+      throw noteRetryError(input.id);
+    }
+  });
+
+session
+  .command('notes [id]')
+  .description('Read a validated chronological journal page as JSON.')
+  .option('--limit <count>', 'Notes per page, from 1 to 50', '20')
+  .option('--before <uuid>', 'olderBeforeId from the previous page')
+  .action(async (id: string | undefined, options: { limit: string; before?: string }) => {
+    const query = sessionNotesQuery(options.limit, options.before);
+    const binding = id ? undefined : bound().binding;
+    const sessionId = id ?? binding?.sessionId;
+    if (!Check(IdSchema, sessionId)) throw new Error('An authorized session UUID is required.');
+    const { origin, token } = connection(binding);
+    console.log(JSON.stringify(await readSessionNotes(origin, token, sessionId, query), null, 2));
+  });
+
 program
   .command('run')
   .description(
@@ -342,7 +398,7 @@ program
     for (const [index, step] of answer.steps.entries())
       console.log(`${index + 1}. ${step.text}\n   Sources: ${step.sourceIds.join(', ')}`);
     if (answer.uncertainty.length) console.log(`\nUncertainty: ${answer.uncertainty.join(' ')}`);
-    for (const source of answer.sources) console.log(`[${source.id}] ${source.locator}`);
+    for (const source of answer.sources) console.log(formatRecallCitation(source));
   });
 
 try {

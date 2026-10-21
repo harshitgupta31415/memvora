@@ -1,12 +1,14 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue, SQLOutputValue } from 'node:sqlite';
 import type {
   CapturedEvent,
   CreateRepository,
   CreateSession,
+  CreateSessionNote,
   Dashboard,
   JobsQuery,
   JobSummary,
@@ -23,8 +25,11 @@ import type {
   SessionContext,
   SessionEventsPage,
   SessionEventsQuery,
+  SessionNote,
+  SessionNotesPage,
+  SessionNotesQuery,
 } from '@memvora/contracts';
-import { DomainError, newId, redactText } from '@memvora/core';
+import { DomainError, newId, prepareSessionNote, redactText } from '@memvora/core';
 import type {
   AcceptedEvent,
   EnrichmentJob,
@@ -40,6 +45,7 @@ import {
   localRepositorySourcesMigrationSql,
   localRetryMigrationSql,
   localSessionHistoryMigrationSql,
+  localSessionNotesMigrationSql,
   localSchemaSql,
 } from './sqlite-schema.js';
 
@@ -70,8 +76,19 @@ const nullable = (row: Row, key: string): string | null =>
   row[key] == null ? null : String(row[key]);
 const notFound = () =>
   new DomainError('NOT_FOUND', 'The requested resource is not available in this workspace.', 404);
+const immutableNoteConflict = () =>
+  new DomainError(
+    'IMMUTABLE_NOTE_CONFLICT',
+    'The evidence ID is already used by another investigation record.',
+    409,
+  );
 const now = () => new Date().toISOString();
 const parse = <T>(value: SQLOutputValue | undefined): T => JSON.parse(String(value)) as T;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const noteJoins =
+  'JOIN local_sessions s ON s.id=n.session_id AND s.workspace_id=n.workspace_id AND s.repository_id=n.repository_id JOIN local_repositories r ON r.id=n.repository_id AND r.workspace_id=n.workspace_id JOIN local_workspaces w ON w.id=n.workspace_id';
+const noteScope =
+  "n.workspace_id=? AND w.owner_user_id=? AND w.generation=? AND w.status='active' AND r.status='active' AND s.status!='deleted' AND n.workspace_generation=w.generation AND n.repository_generation=r.generation AND n.session_generation=s.generation";
 const sourceHistoryLimits = { textBytes: 32 * 1024 * 1024, versions: 2_000 } as const;
 const sourceLines = (text: string): string[] =>
   text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
@@ -132,7 +149,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     if (this.path !== ':memory:') mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     this.database = new DatabaseSync(this.path, { timeout: 5_000 });
     const version = this.one('PRAGMA user_version');
-    if (version && integer(version, 'user_version') > 6) {
+    if (version && integer(version, 'user_version') > 7) {
       this.database.close();
       throw new Error('Local database schema is newer than this application.');
     }
@@ -140,7 +157,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     this.transaction(() => {
       // Re-read after BEGIN IMMEDIATE: another process may have migrated while this one waited.
       const currentVersion = integer(this.one('PRAGMA user_version') ?? {}, 'user_version');
-      if (currentVersion > 6)
+      if (currentVersion > 7)
         throw new Error('Local database schema is newer than this application.');
       if (currentVersion < 2) {
         this.database.exec(localFtsMigrationSql);
@@ -162,6 +179,10 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
       if (currentVersion < 6) {
         this.database.exec(localGitHubConnectionMigrationSql);
         this.database.exec('PRAGMA user_version=6');
+      }
+      if (currentVersion < 7) {
+        this.database.exec(localSessionNotesMigrationSql);
+        this.database.exec('PRAGMA user_version=7');
       }
     });
     this.transaction(() => {
@@ -751,6 +772,220 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
       };
     }, 'read');
   }
+  private sessionNoteRow(context: LocalContext, id: string): Row {
+    this.requireContext(context);
+    const row = this.one(
+      `SELECT n.* FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.id=?`,
+      context.workspace.id,
+      context.user.id,
+      context.workspace.generation,
+      id,
+    );
+    if (!row) throw notFound();
+    return row;
+  }
+  private sessionNoteDto(row: Row): SessionNote {
+    const repositoryId = string(row, 'repository_id');
+    return {
+      id: string(row, 'id'),
+      repositoryId,
+      sessionId: string(row, 'session_id'),
+      kind: string(row, 'kind') as SessionNote['kind'],
+      body: string(row, 'body'),
+      author: { id: string(row, 'author_id'), name: string(row, 'author_name') },
+      createdAt: string(row, 'created_at'),
+      label: 'User-authored — not independently verified',
+      sources: parse<string[]>(row['event_ids_json']).map((id) => ({
+        id,
+        kind: 'event',
+        repositoryId,
+        locator: `/v1/events/${id}`,
+      })),
+    };
+  }
+  createSessionNote(
+    context: LocalContext,
+    sessionId: string,
+    input: CreateSessionNote,
+  ): { note: SessionNote; created: boolean } {
+    const prepared = prepareSessionNote(input);
+    return this.transaction(() => {
+      const session = this.sessionRow(context, sessionId);
+      const repository = this.repositoryRow(context, string(session, 'repository_id'));
+      if (
+        this.one(
+          'SELECT id FROM local_events WHERE workspace_id=? AND id=?',
+          context.workspace.id,
+          prepared.input.id,
+        ) ||
+        this.one(
+          'SELECT id FROM local_repository_sources WHERE workspace_id=? AND id=?',
+          context.workspace.id,
+          prepared.input.id,
+        )
+      )
+        throw immutableNoteConflict();
+      const prior = this.one('SELECT id FROM local_session_notes WHERE id=?', prepared.input.id);
+      if (prior) {
+        const existing = this.sessionNoteRow(context, prepared.input.id);
+        if (existing['session_id'] !== sessionId || existing['digest'] !== prepared.digest)
+          throw immutableNoteConflict();
+        return { note: this.sessionNoteDto(existing), created: false };
+      }
+      for (const eventId of prepared.input.eventIds) {
+        if (
+          !this.one(
+            'SELECT id FROM local_events WHERE id=? AND workspace_id=? AND repository_id=? AND session_id=?',
+            eventId,
+            context.workspace.id,
+            string(repository, 'id'),
+            sessionId,
+          )
+        )
+          throw notFound();
+      }
+      let authorName = redactText(
+        stripVTControlCharacters(context.user.name).replace(
+          /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu,
+          '',
+        ),
+      )
+        .trim()
+        .slice(0, 100);
+      if (/[\uD800-\uDBFF]$/u.test(authorName)) authorName = authorName.slice(0, -1);
+      this.run(
+        'INSERT INTO local_session_notes(id,workspace_id,repository_id,session_id,workspace_generation,repository_generation,session_generation,digest,kind,body,author_id,author_name,event_ids_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        prepared.input.id,
+        context.workspace.id,
+        string(repository, 'id'),
+        sessionId,
+        context.workspace.generation,
+        integer(repository, 'generation'),
+        integer(session, 'generation'),
+        prepared.digest,
+        prepared.input.kind,
+        prepared.input.body,
+        context.user.id,
+        authorName,
+        JSON.stringify(prepared.input.eventIds),
+        now(),
+      );
+      return {
+        note: this.sessionNoteDto(this.sessionNoteRow(context, prepared.input.id)),
+        created: true,
+      };
+    });
+  }
+  getSessionNote(context: LocalContext, id: string): SessionNote {
+    return this.transaction(() => this.sessionNoteDto(this.sessionNoteRow(context, id)), 'read');
+  }
+  sessionNotes(
+    context: LocalContext,
+    sessionId: string,
+    query: SessionNotesQuery = {},
+  ): SessionNotesPage {
+    if (
+      !query ||
+      typeof query !== 'object' ||
+      Array.isArray(query) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(query)) ||
+      Object.keys(query).some((key) => !['limit', 'before'].includes(key)) ||
+      (query.before !== undefined &&
+        (typeof query.before !== 'string' || !uuid.test(query.before))) ||
+      (query.limit !== undefined &&
+        (typeof query.limit !== 'number' ||
+          !Number.isSafeInteger(query.limit) ||
+          query.limit < 1 ||
+          query.limit > 50))
+    )
+      throw new DomainError(
+        'INVALID_SESSION_NOTES_QUERY',
+        'The investigation notes query is invalid.',
+        400,
+      );
+    return this.transaction(() => {
+      this.sessionRow(context, sessionId);
+      const before = query.before === undefined ? null : this.sessionNoteRow(context, query.before);
+      if (before && before['session_id'] !== sessionId) throw notFound();
+      const values = [
+        context.workspace.id,
+        context.user.id,
+        context.workspace.generation,
+        sessionId,
+      ];
+      const totalNotes = integer(
+        this.one(
+          `SELECT count(*) AS count FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.session_id=?`,
+          ...values,
+        ) ?? {},
+        'count',
+      );
+      const selected = this.rows(
+        `SELECT n.* FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.session_id=?${before ? ' AND n.ordinal<?' : ''} ORDER BY n.ordinal DESC LIMIT ?`,
+        ...values,
+        ...(before ? [integer(before, 'ordinal')] : []),
+        query.limit ?? 20,
+      ).reverse();
+      const oldest = selected[0];
+      const hasOlder =
+        oldest &&
+        this.one(
+          `SELECT n.id FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.session_id=? AND n.ordinal<? LIMIT 1`,
+          ...values,
+          integer(oldest, 'ordinal'),
+        );
+      return {
+        sessionId,
+        totalNotes,
+        items: selected.map((row) => this.sessionNoteDto(row)),
+        olderBeforeId: hasOlder && oldest ? string(oldest, 'id') : null,
+      };
+    }, 'read');
+  }
+  searchSessionNotes(
+    context: LocalContext,
+    input: SearchRequest,
+    sessionId?: string,
+  ): SessionNote[] {
+    if (
+      !input ||
+      typeof input.query !== 'string' ||
+      input.query.length > 2_000 ||
+      (input.repositoryIds !== undefined &&
+        (!Array.isArray(input.repositoryIds) ||
+          input.repositoryIds.length > 20 ||
+          input.repositoryIds.some((id) => typeof id !== 'string' || !uuid.test(id)))) ||
+      (input.limit !== undefined &&
+        (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 20))
+    )
+      throw new DomainError(
+        'INVALID_QUERY',
+        'The investigation notes search query is invalid.',
+        400,
+      );
+    return this.transaction(() => {
+      this.requireContext(context);
+      if (sessionId !== undefined) this.sessionRow(context, sessionId);
+      const ids = input.repositoryIds ? [...new Set(input.repositoryIds)] : undefined;
+      if (ids) {
+        for (const id of ids) this.repositoryRow(context, id);
+        if (!ids.length) return [];
+      }
+      const match = literalSearchTerms(input.query)
+        .map((term) => `"${term.replaceAll('"', '""')}"`)
+        .join(' OR ');
+      return this.rows(
+        `SELECT n.*,bm25(local_session_note_fts) AS rank FROM local_session_note_fts JOIN local_session_notes n ON n.id=local_session_note_fts.note_id ${noteJoins} WHERE local_session_note_fts MATCH ? AND ${noteScope}${ids ? ` AND n.repository_id IN (${ids.map(() => '?').join(',')})` : ''}${sessionId !== undefined ? ' AND n.session_id=?' : ''} ORDER BY rank ASC,n.ordinal DESC LIMIT ?`,
+        match,
+        context.workspace.id,
+        context.user.id,
+        context.workspace.generation,
+        ...(ids ?? []),
+        ...(sessionId !== undefined ? [sessionId] : []),
+        input.limit ?? 10,
+      ).map((row) => this.sessionNoteDto(row));
+    }, 'read');
+  }
   private encodeHistoryCursor(value: HistoryCursor): string {
     const body = Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
     const signature = createHmac('sha256', this.historyCursorSecret)
@@ -1001,20 +1236,34 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     ).map((row) => parse<CapturedEvent>(row['payload_json']));
   }
   recentSession(context: LocalContext, repositoryIds?: string[]): SessionContext | null {
-    this.requireContext(context);
-    const ids = repositoryIds ? [...new Set(repositoryIds)] : undefined;
-    if (ids) {
-      for (const id of ids) this.repositoryRow(context, id);
-      if (!ids.length) return null;
-    }
-    const row = this.one(
-      `SELECT e.session_id FROM local_events e JOIN local_sessions s ON s.id=e.session_id JOIN local_repositories r ON r.id=e.repository_id JOIN local_workspaces w ON w.id=e.workspace_id WHERE e.workspace_id=? AND s.status!='deleted' AND r.status='active' AND w.status='active' AND w.generation=? AND w.owner_user_id=?${ids ? ` AND e.repository_id IN (${ids.map(() => '?').join(',')})` : ''} ORDER BY e.received_at DESC,e.rowid DESC LIMIT 1`,
-      context.workspace.id,
-      context.workspace.generation,
-      context.user.id,
-      ...(ids ?? []),
-    );
-    return row ? this.getSession(context, string(row, 'session_id')) : null;
+    return this.transaction(() => {
+      this.requireContext(context);
+      const ids = repositoryIds ? [...new Set(repositoryIds)] : undefined;
+      if (ids) {
+        for (const id of ids) this.repositoryRow(context, id);
+        if (!ids.length) return null;
+      }
+      const event = this.one(
+        `SELECT e.session_id,e.received_at AS activity_at FROM local_events e JOIN local_event_intakes i ON i.event_id=e.id JOIN local_sessions s ON s.id=e.session_id AND s.workspace_id=e.workspace_id AND s.repository_id=e.repository_id JOIN local_repositories r ON r.id=e.repository_id AND r.workspace_id=e.workspace_id JOIN local_workspaces w ON w.id=e.workspace_id WHERE e.workspace_id=? AND s.status!='deleted' AND r.status='active' AND w.status='active' AND w.generation=? AND w.owner_user_id=?${ids ? ` AND e.repository_id IN (${ids.map(() => '?').join(',')})` : ''} ORDER BY e.received_at DESC,i.id DESC LIMIT 1`,
+        context.workspace.id,
+        context.workspace.generation,
+        context.user.id,
+        ...(ids ?? []),
+      );
+      const note = this.one(
+        `SELECT n.session_id,n.created_at AS activity_at FROM local_session_notes n ${noteJoins} WHERE ${noteScope}${ids ? ` AND n.repository_id IN (${ids.map(() => '?').join(',')})` : ''} ORDER BY n.created_at DESC,n.ordinal DESC LIMIT 1`,
+        context.workspace.id,
+        context.user.id,
+        context.workspace.generation,
+        ...(ids ?? []),
+      );
+      // Equal timestamps prefer an explicit authored update over a command upload.
+      const latest =
+        note && (!event || string(note, 'activity_at') >= string(event, 'activity_at'))
+          ? note
+          : event;
+      return latest ? this.getSession(context, string(latest, 'session_id')) : null;
+    }, 'read');
   }
   ingest(context: LocalContext, events: AcceptedEvent[]): string[] {
     return this.transaction(() => {
@@ -1028,6 +1277,28 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
         const repository = this.repositoryRow(context, event.repositoryId);
         const session = this.sessionRow(context, event.sessionId);
         if (session['repository_id'] !== event.repositoryId) throw notFound();
+        if (
+          this.one(
+            `SELECT n.id FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.id=?`,
+            context.workspace.id,
+            context.user.id,
+            context.workspace.generation,
+            event.eventId,
+          )
+        )
+          throw immutableNoteConflict();
+        if (
+          this.one(
+            'SELECT id FROM local_repository_sources WHERE workspace_id=? AND id=?',
+            context.workspace.id,
+            event.eventId,
+          )
+        )
+          throw new DomainError(
+            'IMMUTABLE_EVENT_CONFLICT',
+            'The evidence ID is already used by another investigation record.',
+            409,
+          );
         const existing = this.one(
           'SELECT digest,workspace_id FROM local_events WHERE id=?',
           event.eventId,
@@ -1240,6 +1511,11 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     this.transaction(() => {
       this.sessionRow(context, id);
       this.run(
+        'DELETE FROM local_session_notes WHERE workspace_id=? AND session_id=?',
+        context.workspace.id,
+        id,
+      );
+      this.run(
         "UPDATE local_sessions SET generation=generation+1,status='deleted' WHERE id=? AND workspace_id=?",
         id,
         context.workspace.id,
@@ -1254,6 +1530,11 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   deleteRepository(context: LocalContext, id: string): void {
     this.transaction(() => {
       this.repositoryRow(context, id);
+      this.run(
+        'DELETE FROM local_session_notes WHERE workspace_id=? AND repository_id=?',
+        context.workspace.id,
+        id,
+      );
       this.run(
         "UPDATE local_repositories SET generation=generation+1,status='deleted' WHERE id=? AND workspace_id=?",
         id,
@@ -1280,6 +1561,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   deleteWorkspace(context: LocalContext): void {
     this.transaction(() => {
       this.requireContext(context);
+      this.run('DELETE FROM local_session_notes WHERE workspace_id=?', context.workspace.id);
       this.run(
         'DELETE FROM local_github_oauth_attempts WHERE workspace_id=?',
         context.workspace.id,

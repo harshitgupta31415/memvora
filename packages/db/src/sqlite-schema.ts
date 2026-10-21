@@ -200,3 +200,39 @@ CREATE TABLE IF NOT EXISTS local_github_oauth_attempts (
   expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0)
 ) STRICT;
 `;
+
+/** Version 7 records immutable, explicitly user-authored investigation context. */
+export const localSessionNotesMigrationSql = `
+CREATE TABLE IF NOT EXISTS local_session_notes (
+  ordinal INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  workspace_id TEXT NOT NULL REFERENCES local_workspaces(id),
+  repository_id TEXT NOT NULL REFERENCES local_repositories(id),
+  session_id TEXT NOT NULL REFERENCES local_sessions(id),
+  workspace_generation INTEGER NOT NULL,
+  repository_generation INTEGER NOT NULL,
+  session_generation INTEGER NOT NULL,
+  digest TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('note','decision','resolution')),
+  body TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  event_ids_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS local_session_notes_session ON local_session_notes(workspace_id,session_id,ordinal DESC);
+CREATE INDEX IF NOT EXISTS local_session_notes_repository ON local_session_notes(workspace_id,repository_id,ordinal DESC);
+CREATE INDEX IF NOT EXISTS local_session_notes_recent ON local_session_notes(workspace_id,created_at DESC,ordinal DESC);
+CREATE VIRTUAL TABLE IF NOT EXISTS local_session_note_fts USING fts5(note_id UNINDEXED,body,tokenize='unicode61');
+CREATE TRIGGER IF NOT EXISTS local_session_note_immutable BEFORE UPDATE ON local_session_notes BEGIN
+  SELECT RAISE(ABORT,'SESSION_NOTE_IMMUTABLE');
+END;
+CREATE TRIGGER IF NOT EXISTS local_session_note_fts_insert AFTER INSERT ON local_session_notes BEGIN
+  INSERT INTO local_session_note_fts(note_id,body) VALUES(new.id,new.body);
+END;
+CREATE TRIGGER IF NOT EXISTS local_session_note_fts_delete AFTER DELETE ON local_session_notes BEGIN
+  DELETE FROM local_session_note_fts WHERE note_id=old.id;
+END;
+INSERT INTO local_session_note_fts(note_id,body)
+  SELECT n.id,n.body FROM local_session_notes n WHERE NOT EXISTS(SELECT 1 FROM local_session_note_fts f WHERE f.note_id=n.id);
+`;

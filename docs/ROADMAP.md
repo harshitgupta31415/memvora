@@ -4,7 +4,7 @@ This is the original dependency-ordered plan for the full hosted product. The co
 
 ## Current local baseline
 
-The repository implements a Next.js interface, authenticated loopback API, local SQLite evidence/job storage, command wrapper/outbox, sessions, cited recall and read-only MCP retrieval tools. Default memory processing produces labeled observations; optional HTTP AI requires deliberate configuration. GitHub context is an explicit bounded manual import through authenticated `gh`, while OAuth/App registration and continuous sync remain separate. The draft PostgreSQL schema is not an applied migration. The stages below remain the full product's delivery and acceptance plan; code presence is not proof that their gates have passed.
+The repository implements a Next.js interface, authenticated loopback API, local SQLite evidence/job storage, command wrapper/outbox, sessions, cited recall and read-only MCP retrieval tools. Investigation history is paged; deterministic recaps and separate user-authored journal entries preserve observations and attributed decisions. Default memory processing produces labeled observations; optional HTTP AI requires deliberate configuration. GitHub context supports explicit bounded imports through a configured private GitHub App or authenticated local `gh`; live App registration/consent and continuous synchronization remain separate. The draft PostgreSQL schema is not an applied migration. The stages below remain the full product's delivery and acceptance plan; code presence is not proof that their gates have passed.
 
 ## Stage 1 — Contracts and durable ownership
 

@@ -2,10 +2,9 @@ import Type from 'typebox';
 
 const object = <T extends Record<string, Type.TSchema>>(properties: T) =>
   Type.Object(properties, { additionalProperties: false });
-export const IdSchema = Type.String({
-  pattern:
-    '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
-});
+export const uuidPattern =
+  '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$';
+export const IdSchema = Type.String({ pattern: uuidPattern });
 export const TimestampSchema = Type.String({ format: 'date-time' });
 export const NullableStringSchema = Type.Union([Type.String(), Type.Null()]);
 
@@ -197,6 +196,58 @@ export const CitationSchema = object({
   locator: Type.String(),
 });
 export type Citation = Type.Static<typeof CitationSchema>;
+export const SessionNoteKindSchema = Type.Union([
+  Type.Literal('note'),
+  Type.Literal('decision'),
+  Type.Literal('resolution'),
+]);
+export const CreateSessionNoteSchema = object({
+  id: IdSchema,
+  kind: SessionNoteKindSchema,
+  body: Type.String({ minLength: 1, maxLength: 4000 }),
+  eventIds: Type.Array(IdSchema, { maxItems: 10, uniqueItems: true }),
+});
+export type CreateSessionNote = Type.Static<typeof CreateSessionNoteSchema>;
+export const SessionNoteSchema = object({
+  id: IdSchema,
+  repositoryId: IdSchema,
+  sessionId: IdSchema,
+  kind: SessionNoteKindSchema,
+  body: Type.String({ minLength: 1, maxLength: 4000 }),
+  author: object({ id: IdSchema, name: Type.String({ maxLength: 100 }) }),
+  createdAt: TimestampSchema,
+  label: Type.Literal('User-authored — not independently verified'),
+  sources: Type.Array(CitationSchema, { maxItems: 10 }),
+});
+export type SessionNote = Type.Static<typeof SessionNoteSchema>;
+export const SessionNoteResponseSchema = object({ note: SessionNoteSchema });
+export const SessionNotesQuerySchema = object({
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  before: Type.Optional(IdSchema),
+});
+export type SessionNotesQuery = Type.Static<typeof SessionNotesQuerySchema>;
+export const SessionNotesPageSchema = object({
+  sessionId: IdSchema,
+  totalNotes: Type.Integer({ minimum: 0 }),
+  items: Type.Array(SessionNoteSchema, { maxItems: 50 }),
+  olderBeforeId: Type.Union([IdSchema, Type.Null()]),
+});
+export type SessionNotesPage = Type.Static<typeof SessionNotesPageSchema>;
+export const SessionNoteSearchResponseSchema = object({
+  items: Type.Array(SessionNoteSchema, { maxItems: 20 }),
+  requestId: Type.String(),
+});
+export const SessionNoteCitationSchema = object({
+  id: IdSchema,
+  kind: Type.Literal('session_note'),
+  repositoryId: IdSchema,
+  sessionId: IdSchema,
+  locator: Type.String({ maxLength: 128 }),
+  authorName: Type.String({ maxLength: 100 }),
+  createdAt: TimestampSchema,
+  noteKind: SessionNoteKindSchema,
+});
+export type SessionNoteCitation = Type.Static<typeof SessionNoteCitationSchema>;
 export const RepositorySourceMetadataSchema = object({
   id: IdSchema,
   repositoryId: IdSchema,
@@ -250,7 +301,11 @@ export const RepositoryFileCitationSchema = object({
   endLine: Type.Integer({ minimum: 1 }),
 });
 export type RepositoryFileCitation = Type.Static<typeof RepositoryFileCitationSchema>;
-export const RecallCitationSchema = Type.Union([CitationSchema, RepositoryFileCitationSchema]);
+export const RecallCitationSchema = Type.Union([
+  CitationSchema,
+  RepositoryFileCitationSchema,
+  SessionNoteCitationSchema,
+]);
 export type RecallCitation = Type.Static<typeof RecallCitationSchema>;
 export const MemorySchema = object({
   id: IdSchema,
