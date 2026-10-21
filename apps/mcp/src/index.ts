@@ -30,6 +30,7 @@ import { buildSessionContextResult } from './session-context.js';
 import { buildSessionRecapResult } from './session-recap.js';
 import { buildSessionNotesResult, type SessionNoteSearchResult } from './session-notes.js';
 import { buildSessionHandoverPreview } from './session-handover.js';
+import { findSessions } from './session-directory.js';
 
 const annotations = {
   readOnlyHint: true,
@@ -60,6 +61,32 @@ serveStdio(() => {
       annotations,
     },
     async () => toolResult(() => request<SystemStatus>('/v1/system/status', SystemStatusSchema)),
+  );
+
+  server.registerTool(
+    'find_sessions',
+    {
+      description:
+        'Find authorized investigations by literal title, optional repository and open/closed filters. Returns one complete live page ordered by newest creation time with nextCursor; this searches titles, not command/error/note/code content. Follow the cursor with unchanged filters to find older investigations; page size may change. Does not run commands or change a session.',
+      inputSchema: z.object({
+        query: z.string().max(200).optional(),
+        repositoryId: z.string().uuid().optional(),
+        status: z.enum(['open', 'closed']).optional(),
+        limit: z.number().int().min(1).max(10).optional(),
+        cursor: z.string().min(1).max(2048).optional(),
+      }),
+      annotations,
+    },
+    async ({ query, repositoryId, status, limit, cursor }) =>
+      toolResult(() =>
+        findSessions({
+          ...(query === undefined ? {} : { query }),
+          ...(repositoryId === undefined ? {} : { repositoryId }),
+          ...(status === undefined ? {} : { status }),
+          ...(limit === undefined ? {} : { limit }),
+          ...(cursor === undefined ? {} : { cursor }),
+        }),
+      ),
   );
 
   server.registerTool(

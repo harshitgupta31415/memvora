@@ -82,6 +82,38 @@ export const CreateSessionSchema = object({
 export type CreateSession = Type.Static<typeof CreateSessionSchema>;
 export const SessionResponseSchema = object({ session: SessionSchema });
 export const SessionListSchema = object({ items: Type.Array(SessionSchema) });
+export const SessionDirectoryRequestSchema = object({
+  query: Type.Optional(Type.String({ maxLength: 200 })),
+  repositoryId: Type.Optional(IdSchema),
+  status: Type.Optional(Type.Union([Type.Literal('open'), Type.Literal('closed')])),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })),
+});
+export type SessionDirectoryRequest = Type.Static<typeof SessionDirectoryRequestSchema>;
+export const SessionDirectoryPageSchema = object({
+  items: Type.Array(
+    object({
+      ...SessionSchema.properties,
+      title: Type.String({ maxLength: 200 }),
+      titleTruncated: Type.Boolean(),
+    }),
+    { maxItems: 50 },
+  ),
+  filters: object({
+    query: Type.String({ maxLength: 200 }),
+    repositoryId: Type.Union([IdSchema, Type.Null()]),
+    status: Type.Union([Type.Literal('all'), Type.Literal('open'), Type.Literal('closed')]),
+  }),
+  page: object({
+    limit: Type.Integer({ minimum: 1, maximum: 50 }),
+    returnedItems: Type.Integer({ minimum: 0, maximum: 50 }),
+    totalMatching: Type.Integer({ minimum: 0 }),
+    nextCursor: Type.Union([Type.String({ minLength: 1, maxLength: 2048 }), Type.Null()]),
+    order: Type.Literal('newest_created_first'),
+    consistency: Type.Literal('live'),
+  }),
+});
+export type SessionDirectoryPage = Type.Static<typeof SessionDirectoryPageSchema>;
 
 export const EventSchema = object({
   eventId: IdSchema,

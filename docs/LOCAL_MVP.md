@@ -17,6 +17,22 @@ The web server, CLI and MCP share runtime response contracts and the same local 
 
 Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. Lexical recall also searches the latest imported redacted code snapshot and returns immutable file citations. The optional provider path is separate and remains disabled unless explicitly configured.
 
+### Find an older investigation
+
+The Investigations page searches the complete authorized session directory before limiting results. Use a literal title substring, repository and optional open/closed filter; it does not search command/error, journal or imported-code content. Use Ask for those evidence queries. Title matching normalizes Unicode to NFC and lowercase, with punctuation treated literally. The display is bounded to 200 characters; `titleTruncated` indicates that matching text may fall outside the shown prefix. Open/closed describes the investigation state, not whether a fix was verified.
+
+Each page is ordered by newest creation time and ID, rather than latest command/note activity. The page count and whole filtered matching count are separate. Use Older results to continue or First page to refresh the newest view; filter submissions reset the cursor. Directory pages are live reads, so later creation/deletion can change totals. A malformed browser URL shows a recoverable error without falling back to a wider search; its error view can have HTTP 200, while invalid API inputs return 400.
+
+```powershell
+node apps/cli/dist/index.js session list
+node apps/cli/dist/index.js session list --repository <repository-id> --query "migration" --status closed --limit 10
+node apps/cli/dist/index.js session list --all-repositories --query "migration" --limit 5 --cursor <nextCursor>
+```
+
+CLI prints one runtime-validated page as JSON. Default scope is the bound repository when present, otherwise the authorized workspace; query/status options retain that scope. `--repository` and `--all-repositories` are mutually exclusive explicit scopes that ignore cwd binding configuration. Read returned `filters` for the effective normalized selection. CLI/API page size defaults to 20 and supports 1–50. MCP `find_sessions` accepts `query`, `repositoryId`, `status`, `cursor` and a 1–10 limit (default five); it returns every page member and original API-provided title/flag within a 96 KiB escaped transport budget.
+
+All clients call protected `POST /v1/sessions/search` with a validated JSON body. Return `page.nextCursor` unchanged for older results, or omit it for a fresh first page. Page size may change; effective filters must remain the same when using a cursor. These purpose-bound signed cursors survive restart and deletion of their anchor row, but do not bypass current scope/generation checks. They store a query digest rather than raw query text. No client follows pages automatically. This is distinct from the fixed accepted-event snapshots in `session show`/`get_session_context`. The directory requires no migration or provider credentials and loads no raw evidence payloads.
+
 ### Investigation journal
 
 Open an investigation to record a note, decision or reported resolution, optionally linking up to ten captured command IDs from that investigation. Entries keep the local user's author/time, remain separate from raw command evidence and are not independently verified. Report text is normalized and redacted before persistence/search. Existing entries cannot be edited; add a correction as another note. Saving a resolution report does not close the investigation or prove a fix.
@@ -190,7 +206,7 @@ Known credential patterns, the local token, password/token arguments and private
 | `/`                       | Counts and recent recorded work in the local workspace.                      |
 | `/repositories`           | Explicit local registration plus optional GitHub browsing/import.            |
 | `/repositories/[id]`      | Repository details, imported context and relevant sessions.                  |
-| `/sessions`               | Investigation list.                                                          |
+| `/sessions`               | Server-filtered live investigation directory with bounded older pages.       |
 | `/sessions/[id]`          | Captured attempts and generated/observed memories.                           |
 | `/sessions/[id]/handover` | Personal report preview, coverage and Markdown/JSON downloads.               |
 | `/events/[id]`            | Original command, outcome, output and tracked diffs.                         |

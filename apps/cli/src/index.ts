@@ -25,6 +25,11 @@ import {
 import { captureCommand, gitText, recoverIncomplete } from './capture.js';
 import { formatSessionRecap, readSessionRecap } from './session-recap.js';
 import {
+  readSessionDirectory,
+  resolveSessionDirectoryRequest,
+  type SessionListOptions,
+} from './session-directory.js';
+import {
   handoverFormat,
   readSessionHandoverDownload,
   writeSessionHandoverFile,
@@ -210,6 +215,25 @@ program
 const session = program
   .command('session')
   .description('Group captured commands into an investigation.');
+session
+  .command('list')
+  .description(
+    'Find authorized investigations by literal title and server-side filters; print one JSON page.',
+  )
+  .option('--query <title>', 'Literal title substring, up to 200 characters')
+  .option('--repository <uuid>', 'Explicit authorized repository; bypass folder binding')
+  .option('--all-repositories', 'Search the authorized workspace; bypass folder binding')
+  .option('--status <status>', 'open or closed; closure does not verify a fix')
+  .option('--limit <count>', 'Investigations per page, from 1 to 50', '20')
+  .option(
+    '--cursor <cursor>',
+    'nextCursor from the prior page; keep the same filters; page size may change',
+  )
+  .action(async (options: SessionListOptions) => {
+    const { input, binding } = resolveSessionDirectoryRequest(options);
+    const { origin, token } = connection(binding);
+    console.log(JSON.stringify(await readSessionDirectory(origin, token, input), null, 2));
+  });
 session.command('start [title]').action(async (title?: string) => {
   const { root, binding } = bound();
   const updated = await createSession(root, binding, title);

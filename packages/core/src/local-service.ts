@@ -19,6 +19,8 @@ import type {
   RepositorySourceRangeQuery,
   SearchRequest,
   Session,
+  SessionDirectoryRequest,
+  SessionDirectoryPage,
   SessionContext,
   SessionEventsPage,
   SessionEventsQuery,
@@ -96,6 +98,7 @@ export interface LocalEvidenceStore extends GitHubConnectionStore {
     range?: RepositorySourceRangeQuery,
   ): RepositorySourceDetail;
   sessions(context: LocalContext, repositoryId?: string, limit?: number): Session[];
+  findSessions(context: LocalContext, input?: SessionDirectoryRequest): SessionDirectoryPage;
   createSession(context: LocalContext, input: CreateSession): Session;
   getSession(context: LocalContext, id: string): SessionContext;
   createSessionNote(

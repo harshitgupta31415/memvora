@@ -23,13 +23,22 @@ import type {
   SearchRequest,
   Session,
   SessionContext,
+  SessionDirectoryPage,
+  SessionDirectoryRequest,
   SessionEventsPage,
   SessionEventsQuery,
   SessionNote,
   SessionNotesPage,
   SessionNotesQuery,
 } from '@memvora/contracts';
-import { DomainError, newId, prepareSessionNote, redactText } from '@memvora/core';
+import {
+  DomainError,
+  newId,
+  prepareSessionDirectoryRequest,
+  prepareSessionNote,
+  redactText,
+  sessionTitleSearchKey,
+} from '@memvora/core';
 import type {
   AcceptedEvent,
   EnrichmentJob,
@@ -40,6 +49,8 @@ import type {
   SessionRecapEvidence,
 } from '@memvora/core';
 import { GitHubConnections } from './github-connections.js';
+import { SessionDirectoryCursors } from './session-directory-cursor.js';
+import type { SessionDirectoryScope } from './session-directory-cursor.js';
 import {
   localFtsMigrationSql,
   localGitHubConnectionMigrationSql,
@@ -142,6 +153,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   readonly path: string;
   private readonly database: DatabaseSync;
   private readonly historyCursorSecret: Buffer;
+  private readonly sessionDirectoryCursors: SessionDirectoryCursors;
   private readonly githubConnections: GitHubConnections;
   private closed = false;
 
@@ -211,6 +223,14 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
       throw new Error('The persisted history cursor key is missing or invalid.');
     }
     this.historyCursorSecret = Buffer.from(string(historySecret, 'cursor_secret'), 'hex');
+    this.sessionDirectoryCursors = new SessionDirectoryCursors(this.historyCursorSecret);
+    this.database.function('memvora_title_contains', { deterministic: true }, (title, key) =>
+      typeof title === 'string' &&
+      typeof key === 'string' &&
+      sessionTitleSearchKey(title).includes(key)
+        ? 1
+        : 0,
+    );
     this.githubConnections = new GitHubConnections({
       database: this.database,
       transaction: (action) => this.transaction(action),
@@ -717,6 +737,78 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
       Math.min(Math.max(limit, 1), 100),
     );
     return rows.map((row) => this.sessionDto(row));
+  }
+  findSessions(context: LocalContext, input: SessionDirectoryRequest = {}): SessionDirectoryPage {
+    const prepared = prepareSessionDirectoryRequest(input);
+    return this.transaction(() => {
+      this.requireContext(context);
+      const repository =
+        prepared.repositoryId === undefined
+          ? null
+          : this.repositoryRow(context, prepared.repositoryId);
+      const status = prepared.status ?? 'all';
+      const queryKey = sessionTitleSearchKey(prepared.query);
+      const scope: SessionDirectoryScope = {
+        userId: context.user.id,
+        workspaceId: context.workspace.id,
+        workspaceGeneration: context.workspace.generation,
+        repositoryId: prepared.repositoryId ?? null,
+        repositoryGeneration: repository ? integer(repository, 'generation') : null,
+        status,
+        queryHash: createHash('sha256').update(queryKey).digest('hex'),
+      };
+      const boundary =
+        prepared.cursor === undefined
+          ? null
+          : this.sessionDirectoryCursors.decode(prepared.cursor, scope);
+      const from =
+        'FROM local_sessions s JOIN local_repositories r ON r.id=s.repository_id AND r.workspace_id=s.workspace_id JOIN local_workspaces w ON w.id=s.workspace_id';
+      const where = `s.workspace_id=? AND w.owner_user_id=? AND w.generation=? AND w.status='active' AND r.status='active' AND s.status!='deleted'${repository ? ' AND s.repository_id=?' : ''}${status === 'all' ? '' : ' AND s.status=?'}${queryKey ? ' AND memvora_title_contains(s.title,?)=1' : ''}`;
+      const values: SQLInputValue[] = [
+        context.workspace.id,
+        context.user.id,
+        context.workspace.generation,
+        ...(repository ? [prepared.repositoryId!] : []),
+        ...(status === 'all' ? [] : [status]),
+        ...(queryKey ? [queryKey] : []),
+      ];
+      const totalMatching = integer(
+        this.one(`SELECT count(*) AS count ${from} WHERE ${where}`, ...values) ?? {},
+        'count',
+      );
+      const selected = this.rows(
+        `SELECT s.* ${from} WHERE ${where}${boundary ? ' AND (s.created_at<? OR (s.created_at=? AND s.id<?))' : ''} ORDER BY s.created_at DESC,s.id DESC LIMIT ?`,
+        ...values,
+        ...(boundary ? [boundary.createdAt, boundary.createdAt, boundary.id] : []),
+        prepared.limit + 1,
+      );
+      const returned = selected.slice(0, prepared.limit);
+      const last = returned.at(-1);
+      const items = returned.map((row) => {
+        const session = this.sessionDto(row);
+        let title = session.title.slice(0, 200);
+        if (/[\uD800-\uDBFF]$/u.test(title)) title = title.slice(0, -1);
+        return { ...session, title, titleTruncated: session.title.length > 200 };
+      });
+      return {
+        items,
+        filters: { query: prepared.query, repositoryId: prepared.repositoryId ?? null, status },
+        page: {
+          limit: prepared.limit,
+          returnedItems: items.length,
+          totalMatching,
+          nextCursor:
+            selected.length > prepared.limit && last
+              ? this.sessionDirectoryCursors.encode(scope, {
+                  createdAt: string(last, 'created_at'),
+                  id: string(last, 'id'),
+                })
+              : null,
+          order: 'newest_created_first',
+          consistency: 'live',
+        },
+      };
+    }, 'read');
   }
   createSession(context: LocalContext, input: CreateSession): Session {
     return this.transaction(() => {

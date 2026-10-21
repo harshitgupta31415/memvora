@@ -16,6 +16,9 @@ memvora sync
 memvora ask "What happened in the earlier failing test?"
 memvora ask "CodeIdentifier" --repository <authorized-repository-uuid>
 memvora session start "Investigate startup failure"
+memvora session list
+memvora session list --query "migration" --repository <authorized-repository-uuid> --status closed --limit 10
+memvora session list --all-repositories --query "migration" --limit 10 --cursor <nextCursor>
 memvora session show
 memvora session show <authorized-session-uuid> --limit 5
 memvora session show <authorized-session-uuid> --limit 5 --cursor <older-or-newer-cursor>
@@ -47,6 +50,12 @@ Initial conservative limits: 128 KiB persisted output per invocation, 32 KiB per
 Suppressed overlong-line bytes count toward truncation and make capture incomplete. Output truncation and externally signaled termination are also explicitly incomplete; a signaled process is recorded as interrupted rather than as a successful completion.
 
 `session show` prints a validated JSON page containing original events, their linked memories and navigation cursors. With an explicit session UUID it uses the explicit/environment/default API connection independently of folder bindings; without one it uses the current bound session. The default page contains the latest 20 events in chronological order; limits from 1 to 50 are accepted. Follow `page.olderCursor` or `page.newerCursor` with the same limit to inspect a fixed intake snapshot, including histories longer than 100 commands. Omit the cursor to refresh membership. Summaries and current session counts can change as workers finish or new evidence arrives. Cursors remain valid across a server restart but never grant access to deleted or unavailable evidence.
+
+`session list` finds investigations through `POST /v1/sessions/search` and prints one validated JSON page. Optional `--query` searches a literal, case-insensitive title substring (up to 200 characters), `--status` accepts `open` or `closed`, and `--limit` accepts 1–50 (default 20). Filtering happens on the server before limiting, so an older match is not hidden by a newer unrelated page. This searches titles, not command, error, journal or imported-code text; use `ask` for content recall. Closing a session does not verify a fix.
+
+With no explicit scope, `session list` uses the current repository binding and its API origin when available, otherwise all authorized repositories. `--query` and `--status` retain that default scope. `--repository <uuid>` and `--all-repositories` are mutually exclusive and bypass cwd binding lookup entirely, using the explicit/environment/default API connection; a corrupt unrelated binding cannot affect either explicit scope. A corrupt current binding remains an error for the default mode. Selectors narrow access, never grant it. The returned `filters` record the effective normalized query/repository/status.
+
+Results are ordered by newest session creation time, then ID, rather than latest command/note activity. `page.returnedItems` counts this page and `page.totalMatching` counts all matching active investigations at that read; totals can change. Follow `page.nextCursor` unchanged using `--cursor` with the same effective filters; page size may change and null marks the end. Changing filters requires a fresh request without the old cursor. Pages are live views, distinct from the fixed event-intake snapshots in `session show`. No pages are fetched automatically. Returned titles are bounded to 200 characters; `titleTruncated` means the full stored title matched but its displayed prefix may omit the matching text. Open the investigation UUID for its recorded evidence, recap or handover.
 
 `session recap [id]` reads `GET /v1/sessions/:id/recap` through that same protected API and uses the same explicit-ID versus current-binding connection rule as `session show`. It prints a deterministic observed recap: chronological command/outcome citations, bounded output/diff excerpts, coverage, counts and uncertainty. The recap includes all accepted events up to 40; longer investigations include the first 20 and last 20 and explicitly disclose omitted middle events. Counts describe only those included events. Human output further shortens output/diff text and removes terminal controls; `--json` prints the complete runtime-validated bounded recap without raw event payloads. Use `session show` for the remaining retained evidence. A passing command, a nearby diff and session closure do not establish a causal fix.
 

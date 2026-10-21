@@ -3,6 +3,7 @@
 This uses the official TypeScript MCP server SDK v2 and stdio transport. Registered tools:
 
 - `memvora_status`: reads current API capability metadata.
+- `find_sessions`: finds authorized investigations by optional literal title `query`, `repositoryId`, open/closed `status`, `limit` (1–10, default 5) and opaque `cursor`. Returns a complete validated live directory page with effective filters, matching count and `nextCursor`.
 - `search_memory`: searches authorized stored memory with optional `repositoryIds` and `limit`.
 - `get_memory`: reads one authorized memory by `id`, retaining observed-evidence labels, citations and uncertainty.
 - `search_repository_sources`: searches the latest bounded imported files; returns immutable IDs, commit/hash provenance and stored line excerpts. Optional repository IDs narrow access; an empty list returns no files.
@@ -21,6 +22,12 @@ The API must be running. The adapter defaults to `http://127.0.0.1:4000`; overri
 `hasBefore` and `hasAfter` refer to stored lines. An overlong individual line can be truncated even when `hasAfter` is false; always honor `excerptTruncated`. There is currently no character-offset continuation within one overlong line. The API caps a source window at 16 KiB, and MCP shortens it further for the assistant context.
 
 The local token must contain at least 32 characters. Requests reject redirects and API origins containing embedded credentials, query strings or fragments.
+
+`find_sessions` calls `POST /v1/sessions/search`. Repository/status/title filtering occurs on the server before page limits, so older investigations remain findable beyond the newest global page. This is a literal case-insensitive title search, not command/error/journal/code-content recall. Omit `repositoryId` to search the currently authorized workspace; supplied IDs are filters, not authority. The adapter never reads a cwd repository binding. `displayLabel` and `evidenceNotice` disclose these semantics.
+
+Directory results keep every page member, original API-provided title and `titleTruncated` flag unchanged within a 96 KiB escaped MCP content budget. A true flag means the full stored title matched while the bounded display may omit the matching text. The shared core validator checks response schema, effective filters, repository/status/title membership, cardinality, unique IDs, canonical creation times and newest-created/ID ordering. This order is independent of last command/note activity. Open/closed is a session state, not proof of a fix.
+
+The returned `page` contains `limit`, `returnedItems`, `totalMatching`, `nextCursor`, `order: newest_created_first` and `consistency: live`. Pass `nextCursor` unchanged with the same effective filters; page size may change and null marks the end. Changing filters requires starting without the old cursor. No page is followed automatically or silently shortened. Totals and subsequent pages reflect current scoped data, separate from the fixed accepted-event snapshots used by `get_session_context`. Use the returned session UUID with recap/context/handover tools to inspect its evidence.
 
 `get_session_context` calls `GET /v1/sessions/:id/events` rather than the legacy latest-100 session route. Its first result opens a fixed accepted-event snapshot and contains the latest requested events in ascending session-sequence order. Pass `page.olderCursor` unchanged with the same `id` to retrieve earlier work, or `page.newerCursor` to move forward. A null cursor marks the end in that direction. Optional cursor length is at most 2,048 characters; the adapter URL-encodes it for the API.
 

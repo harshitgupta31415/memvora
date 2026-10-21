@@ -10,6 +10,8 @@ Implementation status and verification are distinct. Do not infer that every PRD
 
 Investigations keep captured attempts separate from attributed notes, decisions and reported resolutions. A portable handover combines an observed recap, recent author reports and their linked command evidence into Markdown or JSON, with explicit coverage and offline source links. The website previews it, the CLI exports it, and MCP provides a bounded read-only preview.
 
+Investigation discovery applies title, repository and open/closed filters on the server before limiting results. Older pages remain available through the website, `memvora session list` and MCP `find_sessions`; title search is separate from Ask's evidence-content retrieval.
+
 ## Start locally
 
 Use Node.js **24** or **26**, and npm **11 or later**. Open PowerShell in this folder:

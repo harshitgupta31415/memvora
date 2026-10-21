@@ -135,6 +135,14 @@ Workspace, repo and activity restrictions belong inside candidate SQL, not only 
 
 Retrieved repository text and command output are untrusted content. Delimit it as evidence; never let it request new tools, alter credentials, widen access, or override instructions. MCP tools expose retrieval, not execution.
 
+### Implemented local investigation directory
+
+The local directory is a read path through the existing API/core/SQLite boundary, separate from the hosted PostgreSQL target and the event timeline's snapshot protocol. `POST /v1/sessions/search` validates only a JSON body and performs live principal/workspace/repository checks. SQL applies repository, open/closed status and literal full-title matching before the filtered count and page selection. A deterministic SQLite function compares NFC/lowercase title keys; it does not interpret FTS operators or SQL wildcards. One read transaction returns counts and `createdAt DESC, id DESC` membership. Only bounded session metadata is materialized, with a 200-character title and explicit `titleTruncated` flag; no event/note payloads, queue work or provider calls are needed.
+
+The directory reuses the persisted signing key with a distinct HMAC purpose and filter/scope binding. Cursors carry a normalized-query digest and creation-time/ID boundary, not raw query text, a whole-history offset or a fixed intake watermark. Page size is deliberately excluded from that binding and can change. Restart and deleted boundary rows remain navigable, while live scope, workspace/repository generations and changed effective filters are revalidated. New/deleted records can change totals; a fresh first-page read is the way to see new records above the current boundary. This adds no schema migration and leaves the legacy bounded `GET /v1/sessions` list unchanged.
+
+Web, CLI and read-only MCP share request preparation and page assertions. The web form resets navigation on filter changes, CLI exposes its effective bound/explicit scope, and MCP returns a complete at-most-ten-record page under a 96 KiB escaped transport limit. API-provided titles and clipping flags remain intact; no adapter filters an already limited page to invent a search result. This directory finds titles; the existing cited Ask path remains responsible for command, error, journal and code-content recall. Verification belongs in the status checkpoint rather than being inferred from this design.
+
 ### Implemented local portable handover read
 
 The personal handover slice uses the existing SQLite adapter, not the PostgreSQL target above. Web, CLI and MCP obtain it through the protected API. One read transaction resolves current workspace ownership, active repository/session and their evidence, so counts and selected membership come from the same database snapshot. This adds no migration, writes, queue work or provider calls.

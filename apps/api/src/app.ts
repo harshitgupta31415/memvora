@@ -42,6 +42,8 @@ import {
   SessionEventsPageSchema,
   SessionEventsQuerySchema,
   SessionListSchema,
+  SessionDirectoryRequestSchema,
+  SessionDirectoryPageSchema,
   SessionResponseSchema,
   SettingsSchema,
   SystemStatusSchema,
@@ -249,6 +251,20 @@ export function buildApp(options: AppOptions = {}) {
     async (request) => ({
       items: store.sessions(service.context(), request.query.repositoryId, request.query.limit),
     }),
+  );
+  app.post(
+    '/v1/sessions/search',
+    {
+      schema: {
+        body: SessionDirectoryRequestSchema,
+        querystring: Type.Object({}, { additionalProperties: false }),
+        response: { 200: SessionDirectoryPageSchema },
+      },
+    },
+    async (request, reply) => {
+      reply.header('cache-control', 'no-store');
+      return store.findSessions(service.context(), request.body);
+    },
   );
   app.post(
     '/v1/sessions',
