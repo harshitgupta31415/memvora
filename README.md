@@ -8,6 +8,8 @@ This repository contains a **local MVP implementation**: a Next.js website, a lo
 
 Implementation status and verification are distinct. Do not infer that every PRD requirement, external provider or Windows command has passed acceptance because its code exists. The current checks and remaining gaps are tracked separately from the product plan.
 
+Investigations keep captured attempts separate from attributed notes, decisions and reported resolutions. A portable handover combines an observed recap, recent author reports and their linked command evidence into Markdown or JSON, with explicit coverage and offline source links. The website previews it, the CLI exports it, and MCP provides a bounded read-only preview.
+
 ## Start locally
 
 Use Node.js **24** or **26**, and npm **11 or later**. Open PowerShell in this folder:
@@ -64,7 +66,7 @@ The smoke command deliberately exits unsuccessfully. It is a test input, not a c
 - [Dependency choices](docs/DEPENDENCIES.md)
 - [AI-assisted development workflow](docs/AI_WORKFLOW.md)
 
-The original architecture calls for PostgreSQL, Drizzle, pgvector and pg-boss. Current local persistence and local jobs use SQLite; the draft PostgreSQL definitions are not applied migrations. Production browser sessions, GitHub App callback/webhook flows, device pairing, OS credential-store support, multiuser/company ownership, vector retrieval and PTY capture remain separate work.
+The original architecture calls for PostgreSQL, Drizzle, pgvector and pg-boss. Current local persistence and local jobs use SQLite; the draft PostgreSQL definitions are not applied migrations. A private GitHub App callback is implemented and fixture-tested; live credentials and owner consent remain unverified. Hosted browser sessions, continuous App synchronization/webhooks, device pairing, OS credential-store support, multiuser/company ownership, vector retrieval and PTY capture remain separate work.
 
 Imported-code citations identify immutable redacted file text, path, available commit and stored-snapshot line range. A partial import is not the whole codebase; an unknown commit stays unknown. Current search uses the latest captured snapshot while older citations retain earlier content until parent deletion. Code evidence does not itself demonstrate a historical fix. See [the GitHub guide](docs/GITHUB_SETUP.md) for coverage and retained-history limits.
 
@@ -72,20 +74,21 @@ Imported-code citations identify immutable redacted file text, path, available c
 
 Run resource-intensive commands through `scripts/with-resource-limits.ps1`, as in the examples above.
 
-| Command                                     | Purpose                                                                                                          |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `npm run dev`                               | Build shared packages, then start web and API. The API processes local jobs in the background.                   |
-| `npm run check`                             | Lint, strict types, behavior tests and formatting. This command is not a claim that checks have already passed.  |
-| `npm run build`                             | Compile shared packages/services and build the website. A build does not make local auth production-ready.       |
-| `npm run doctor`                            | Inspect prerequisites without printing credentials.                                                              |
-| `npm run cli -- --help`                     | List actual CLI commands.                                                                                        |
-| `npm run cli -- init`                       | Register and bind the current local repository; create an initial session.                                       |
-| `npm run cli -- run -- <command> [args...]` | Capture a supported explicit command.                                                                            |
-| `npm run cli -- sync`                       | Retry pending evidence without changing event identity.                                                          |
-| `npm run cli -- ask <question>`             | Retrieve cited evidence for the bound repository.                                                                |
-| `npm run mcp`                               | Start the built stdio adapter. Use direct Node in an MCP host to keep stdout clean.                              |
-| `npm run worker:check`                      | Check local worker configuration syntax; it does not consume jobs.                                               |
-| `npm run acceptance:local`                  | With the API running and services built, capture two labeled real error/fix fixtures and verify recall plus MCP. |
+| Command                                                                   | Purpose                                                                                                          |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `npm run dev`                                                             | Build shared packages, then start web and API. The API processes local jobs in the background.                   |
+| `npm run check`                                                           | Lint, strict types, behavior tests and formatting. This command is not a claim that checks have already passed.  |
+| `npm run build`                                                           | Compile shared packages/services and build the website. A build does not make local auth production-ready.       |
+| `npm run doctor`                                                          | Inspect prerequisites without printing credentials.                                                              |
+| `npm run cli -- --help`                                                   | List actual CLI commands.                                                                                        |
+| `npm run cli -- init`                                                     | Register and bind the current local repository; create an initial session.                                       |
+| `npm run cli -- run -- <command> [args...]`                               | Capture a supported explicit command.                                                                            |
+| `npm run cli -- sync`                                                     | Retry pending evidence without changing event identity.                                                          |
+| `npm run cli -- ask <question>`                                           | Retrieve cited evidence for the bound repository.                                                                |
+| `npm run cli -- session export <id> --format markdown --output report.md` | Export one bounded investigation into a new file; existing files are never overwritten.                          |
+| `npm run mcp`                                                             | Start the built stdio adapter. Use direct Node in an MCP host to keep stdout clean.                              |
+| `npm run worker:check`                                                    | Check local worker configuration syntax; it does not consume jobs.                                               |
+| `npm run acceptance:local`                                                | With the API running and services built, capture two labeled real error/fix fixtures and verify recall plus MCP. |
 
 After changing shared packages, rebuild them or restart development so consumers use current compiled exports. Optional configuration can be copied from `.env.example` to ignored `.env`. Keep the same API/data-directory settings in the web app's local environment when overriding defaults; see the local guide.
 

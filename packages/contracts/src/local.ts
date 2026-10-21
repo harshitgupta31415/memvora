@@ -400,6 +400,91 @@ export const SessionEventsPageSchema = object({
   }),
 });
 export type SessionEventsPage = Type.Static<typeof SessionEventsPageSchema>;
+/** Portable excerpts, not a database backup or a complete command capture. */
+export const HandoverEventSchema = object({
+  eventId: IdSchema,
+  repositoryId: IdSchema,
+  sessionId: IdSchema,
+  sequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  startedAt: TimestampSchema,
+  endedAt: TimestampSchema,
+  commandExcerpt: Type.String({ maxLength: 512 }),
+  commandTruncated: Type.Boolean(),
+  cwdExcerpt: Type.String({ maxLength: 512 }),
+  cwdTruncated: Type.Boolean(),
+  git: object({
+    commitSha: Type.Union([Type.String({ pattern: '^[a-fA-F0-9]{40,64}$' }), Type.Null()]),
+    dirty: Type.Boolean(),
+    error: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
+  }),
+  outcome: object({
+    kind: EventSchema.properties.outcome.properties.kind,
+    exitCode: Type.Union([Type.Integer(), Type.Null()]),
+    signal: Type.Union([Type.String({ maxLength: 100 }), Type.Null()]),
+    error: Type.Union([
+      object({ code: Type.String({ maxLength: 100 }), message: Type.String({ maxLength: 300 }) }),
+      Type.Null(),
+    ]),
+  }),
+  capture: EventSchema.properties.capture,
+  outputExcerpt: Type.String({ maxLength: 6000 }),
+  outputTruncated: Type.Boolean(),
+  diffs: Type.Array(
+    object({
+      phase: Type.Union([Type.Literal('before'), Type.Literal('after')]),
+      text: Type.String({ maxLength: 6000 }),
+      excerptTruncated: Type.Boolean(),
+      capturedTruncatedBytes: Type.Integer({ minimum: 0 }),
+    }),
+    { maxItems: 2 },
+  ),
+});
+export type HandoverEvent = Type.Static<typeof HandoverEventSchema>;
+export const SessionHandoverSchema = object({
+  schemaVersion: Type.Literal(1),
+  kind: Type.Literal('memvora_investigation_handover'),
+  generatedAt: TimestampSchema,
+  repository: object({
+    id: IdSchema,
+    name: Type.String({ maxLength: 120 }),
+    remoteUrl: Type.Union([Type.String({ maxLength: 2048 }), Type.Null()]),
+  }),
+  session: object({ ...SessionSchema.properties, title: Type.String({ maxLength: 200 }) }),
+  recap: SessionRecapSchema,
+  notes: Type.Array(SessionNoteSchema, { maxItems: 10 }),
+  coverage: object({
+    totalEvents: Type.Integer({ minimum: 0 }),
+    includedEvents: Type.Integer({ minimum: 0, maximum: 140 }),
+    omittedEvents: Type.Integer({ minimum: 0 }),
+    recapEvents: Type.Integer({ minimum: 0, maximum: 40 }),
+    eventLimit: Type.Literal(140),
+    totalNotes: Type.Integer({ minimum: 0 }),
+    includedNotes: Type.Integer({ minimum: 0, maximum: 10 }),
+    omittedNotes: Type.Integer({ minimum: 0 }),
+    noteLimit: Type.Literal(10),
+    selection: Type.Union([Type.Literal('all'), Type.Literal('first_and_last_plus_note_sources')]),
+    repositoryFilesIncluded: Type.Literal(false),
+    derivedMemoriesIncluded: Type.Literal(false),
+  }),
+  events: Type.Array(HandoverEventSchema, { maxItems: 140 }),
+  excerptLimit: Type.Integer({ minimum: 0, maximum: 6000 }),
+  serializedByteLimit: Type.Literal(2097152),
+  notices: Type.Array(Type.String({ maxLength: 800 }), { maxItems: 12 }),
+});
+export type SessionHandover = Type.Static<typeof SessionHandoverSchema>;
+export const HandoverFormatSchema = Type.Union([Type.Literal('json'), Type.Literal('markdown')]);
+export const SessionHandoverDownloadQuerySchema = object({
+  format: Type.Optional(HandoverFormatSchema),
+});
+export const SessionHandoverDownloadSchema = object({
+  format: HandoverFormatSchema,
+  filename: Type.String({
+    pattern: `^memvora-handover-${uuidPattern.slice(1, -1)}\\.(?:json|md)$`,
+  }),
+  mediaType: Type.Union([Type.Literal('application/json'), Type.Literal('text/markdown')]),
+  content: Type.String({ maxLength: 8388608 }),
+});
+export type SessionHandoverDownload = Type.Static<typeof SessionHandoverDownloadSchema>;
 export const SearchRequestSchema = object({
   query: Type.String({ minLength: 1, maxLength: 2000 }),
   repositoryIds: Type.Optional(Type.Array(IdSchema, { maxItems: 20 })),

@@ -56,6 +56,14 @@ export type SessionRecapEvidence = {
   events: CapturedEvent[];
   totalEventCount: number;
 };
+export type SessionHandoverEvidence = {
+  repository: Repository;
+  recapEvidence: SessionRecapEvidence;
+  notes: SessionNote[];
+  totalNoteCount: number;
+  events: CapturedEvent[];
+  totalEventCount: number;
+};
 export type EnrichmentJob = {
   id: string;
   leaseToken: string;
@@ -107,6 +115,7 @@ export interface LocalEvidenceStore extends GitHubConnectionStore {
     sessionId?: string,
   ): SessionNote[];
   getSessionRecapEvidence(context: LocalContext, id: string): SessionRecapEvidence;
+  getSessionHandoverEvidence(context: LocalContext, id: string): SessionHandoverEvidence;
   getSessionEvents(
     context: LocalContext,
     id: string,

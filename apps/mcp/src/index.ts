@@ -5,6 +5,7 @@ import {
   SearchResponseSchema,
   SessionEventsPageSchema,
   SessionRecapSchema,
+  SessionHandoverSchema,
   SessionNoteResponseSchema,
   SessionNotesPageSchema,
   SessionNoteSearchResponseSchema,
@@ -15,6 +16,7 @@ import {
   type SearchResponse,
   type SessionEventsPage,
   type SessionRecap,
+  type SessionHandover,
   type SessionNote,
   type SessionNotesPage,
   type RepositorySourceDetail,
@@ -27,6 +29,7 @@ import { request, toolResult } from './client.js';
 import { buildSessionContextResult } from './session-context.js';
 import { buildSessionRecapResult } from './session-recap.js';
 import { buildSessionNotesResult, type SessionNoteSearchResult } from './session-notes.js';
+import { buildSessionHandoverPreview } from './session-handover.js';
 
 const annotations = {
   readOnlyHint: true,
@@ -247,6 +250,25 @@ serveStdio(() => {
         if (result.sessionId !== id || result.items.length > (limit ?? 5))
           throw new Error('Journal page returned an unexpected session or result limit.');
         return buildSessionNotesResult(result);
+      }),
+  );
+
+  server.registerTool(
+    'get_session_handover',
+    {
+      description:
+        'Read an authorized investigation handover source manifest and compact preview. fullReportIncluded is false: all included event/note IDs, order, citation memberships and coverage are retained, but command/note text is shortened and output/diff text omitted. Use the website or CLI export for the full portable report. Does not write files, upload, run commands or grant team access.',
+      inputSchema: z.object({ id: z.string().uuid() }),
+      annotations,
+    },
+    async ({ id }) =>
+      toolResult(async () => {
+        const report = await request<SessionHandover>(
+          `/v1/sessions/${id}/handover`,
+          SessionHandoverSchema,
+        );
+        if (report.session.id !== id) throw new Error('Handover returned an unexpected session.');
+        return buildSessionHandoverPreview(report);
       }),
   );
 

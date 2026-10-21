@@ -135,6 +135,18 @@ Workspace, repo and activity restrictions belong inside candidate SQL, not only 
 
 Retrieved repository text and command output are untrusted content. Delimit it as evidence; never let it request new tools, alter credentials, widen access, or override instructions. MCP tools expose retrieval, not execution.
 
+### Implemented local portable handover read
+
+The personal handover slice uses the existing SQLite adapter, not the PostgreSQL target above. Web, CLI and MCP obtain it through the protected API. One read transaction resolves current workspace ownership, active repository/session and their evidence, so counts and selected membership come from the same database snapshot. This adds no migration, writes, queue work or provider calls.
+
+The adapter selects the recap's all-through-40 or first-20/last-20 events and the latest ten current-generation notes in append order. It then resolves every selected note citation against the exact same authorized session/repository, adding linked events outside the recap window. At most 140 unique event payloads and ten notes are materialized; whole histories are not loaded. A missing or foreign cited event fails closed. The core checks citation closure and payload consistency before building a portable report. Recap counts remain about its at-most-40-event sample; report coverage separately describes all included/omitted events and notes.
+
+Shared derivation normalizes controls before defensive redaction, preserves Unicode boundaries and keeps note bodies within their full stored contract. Commands/paths use fixed display excerpts. Output/diff excerpts adapt to keep compact report JSON at most 2 MiB without dropping identities or citation membership. Original capture truncation and export clipping have distinct flags. Pretty JSON/Markdown files have a separate 8 MiB limit. These are resource bounds, not a speed guarantee.
+
+The website's report page and attachment BFF keep API credentials server-side and validate report/download contracts. CLI validates content before stdout or exclusive file creation. Read-only MCP exposes a preview capped at 96 KiB, preserving identities and coverage while explicitly omitting output/diff text and shortening other excerpts; it never writes a report file. All adapters use the same authorized snapshot/derivation rather than inventing their own investigation history.
+
+Included note/event IDs resolve within the portable artifact; originating API locators may later disappear. Repository-file contents and derived memories are excluded. Downloaded copies are independent of live deletion/disconnect and cannot be revoked by Memvora. This implements a personal evidence report, not organization ownership transfer, recipient permissions, a complete backup or offboarding access control.
+
 ## Revocation, deletion and concurrency
 
 Repository access removal blocks reads and writes before asynchronous reindexing/cleanup. Confirmation of current installation access is not the same as user authority to bind an installation.

@@ -207,11 +207,21 @@ export default async function Investigation({
           title={session.title}
           description="Original attempts and their recorded outcomes, with the linked memory for this page alongside."
           action={
-            // A document navigation also refreshes the latest snapshot when this URL is already open.
-            <a href={latestHref} className="button button-small button-ghost">
-              <Icon name="refresh" size={13} />
-              Refresh latest
-            </a>
+            <div className="repository-actions">
+              <Link
+                href={`/sessions/${encodeURIComponent(session.id)}/handover`}
+                className="button button-small"
+                prefetch={false}
+              >
+                <Icon name="repo" size={13} />
+                Handover report
+              </Link>
+              {/* A document navigation also refreshes the latest snapshot when this URL is already open. */}
+              <a href={latestHref} className="button button-small button-ghost">
+                <Icon name="refresh" size={13} />
+                Refresh latest
+              </a>
+            </div>
           }
         />
       </div>

@@ -25,6 +25,11 @@ import {
 import { captureCommand, gitText, recoverIncomplete } from './capture.js';
 import { formatSessionRecap, readSessionRecap } from './session-recap.js';
 import {
+  handoverFormat,
+  readSessionHandoverDownload,
+  writeSessionHandoverFile,
+} from './session-export.js';
+import {
   collectNoteEvent,
   formatRecallCitation,
   noteRetryError,
@@ -262,6 +267,28 @@ session
     const { origin, token } = connection(binding);
     const result = await readSessionRecap(origin, token, sessionId);
     console.log(options.json ? JSON.stringify(result, null, 2) : formatSessionRecap(result));
+  });
+
+session
+  .command('export [id]')
+  .description(
+    'Export one portable cited investigation; no upload, open or overwrite is performed.',
+  )
+  .option('--format <format>', 'markdown or json', 'markdown')
+  .option('--output <path>', 'Create a new file exclusively; defaults to stdout')
+  .action(async (id: string | undefined, options: { format: string; output?: string }) => {
+    const format = handoverFormat(options.format);
+    const binding = id ? undefined : bound().binding;
+    const sessionId = id ?? binding?.sessionId;
+    if (!Check(IdSchema, sessionId)) throw new Error('An authorized session UUID is required.');
+    const { origin, token } = connection(binding);
+    const download = await readSessionHandoverDownload(origin, token, sessionId, format);
+    if (options.output !== undefined) {
+      writeSessionHandoverFile(options.output, download.content);
+      console.error(`Saved ${download.filename} to the requested new file.`);
+    } else {
+      process.stdout.write(download.content);
+    }
   });
 
 session

@@ -36,6 +36,7 @@ import type {
   GitHubConnectionRecord,
   GitHubOAuthAttempt,
   LocalEvidenceStore,
+  SessionHandoverEvidence,
   SessionRecapEvidence,
 } from '@memvora/core';
 import { GitHubConnections } from './github-connections.js';
@@ -748,27 +749,114 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     return { session, events, memories };
   }
   getSessionRecapEvidence(context: LocalContext, id: string): SessionRecapEvidence {
+    return this.transaction(() => this.sessionRecapEvidence(context, id), 'read');
+  }
+  /** The caller owns the read transaction so larger exports keep one consistent snapshot. */
+  private sessionRecapEvidence(context: LocalContext, id: string): SessionRecapEvidence {
+    const session = this.sessionDto(this.sessionRow(context, id));
+    const totalEventCount = session.eventCount;
+    const rows =
+      totalEventCount <= 40
+        ? this.rows(
+            'SELECT payload_json,sequence FROM local_events WHERE workspace_id=? AND session_id=? ORDER BY sequence ASC LIMIT 40',
+            context.workspace.id,
+            id,
+          )
+        : this.rows(
+            'SELECT payload_json,sequence FROM (SELECT payload_json,sequence FROM local_events WHERE workspace_id=? AND session_id=? ORDER BY sequence ASC LIMIT 20) UNION SELECT payload_json,sequence FROM (SELECT payload_json,sequence FROM local_events WHERE workspace_id=? AND session_id=? ORDER BY sequence DESC LIMIT 20) ORDER BY sequence ASC',
+            context.workspace.id,
+            id,
+            context.workspace.id,
+            id,
+          );
+    return {
+      session,
+      events: rows.map((row) => parse<CapturedEvent>(row['payload_json'])),
+      totalEventCount,
+    };
+  }
+  getSessionHandoverEvidence(context: LocalContext, id: string): SessionHandoverEvidence {
     return this.transaction(() => {
-      const session = this.sessionDto(this.sessionRow(context, id));
-      const totalEventCount = session.eventCount;
-      const rows =
-        totalEventCount <= 40
-          ? this.rows(
-              'SELECT payload_json,sequence FROM local_events WHERE workspace_id=? AND session_id=? ORDER BY sequence ASC LIMIT 40',
-              context.workspace.id,
-              id,
-            )
-          : this.rows(
-              'SELECT payload_json,sequence FROM (SELECT payload_json,sequence FROM local_events WHERE workspace_id=? AND session_id=? ORDER BY sequence ASC LIMIT 20) UNION SELECT payload_json,sequence FROM (SELECT payload_json,sequence FROM local_events WHERE workspace_id=? AND session_id=? ORDER BY sequence DESC LIMIT 20) ORDER BY sequence ASC',
-              context.workspace.id,
-              id,
-              context.workspace.id,
-              id,
-            );
+      const recapEvidence = this.sessionRecapEvidence(context, id);
+      const repository = this.repositoryDto(
+        this.repositoryRow(context, recapEvidence.session.repositoryId),
+      );
+      const values = [context.workspace.id, context.user.id, context.workspace.generation, id];
+      const totalNoteCount = integer(
+        this.one(
+          `SELECT count(*) AS count FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.session_id=?`,
+          ...values,
+        ) ?? {},
+        'count',
+      );
+      const selectedNotes = this.rows(
+        `SELECT n.* FROM local_session_notes n ${noteJoins} WHERE ${noteScope} AND n.session_id=? ORDER BY n.ordinal DESC LIMIT 10`,
+        ...values,
+      ).reverse();
+      const notes = selectedNotes.map((row) => this.sessionNoteDto(row));
+      const events = new Map(recapEvidence.events.map((event) => [event.eventId, event]));
+      const invalidEvidence = () =>
+        new DomainError(
+          'INVALID_HANDOVER_EVIDENCE',
+          'The investigation evidence is inconsistent and cannot be exported.',
+          500,
+        );
+      if (events.size !== recapEvidence.events.length) throw invalidEvidence();
+      for (const note of notes) {
+        if (
+          note.sessionId !== id ||
+          note.repositoryId !== repository.id ||
+          note.sources.length > 10 ||
+          new Set(note.sources.map((source) => source.id)).size !== note.sources.length
+        )
+          throw invalidEvidence();
+        for (const source of note.sources) {
+          if (source.repositoryId !== repository.id || !uuid.test(source.id))
+            throw invalidEvidence();
+          const cached = events.get(source.id);
+          const row = this.one(
+            `${cached ? 'SELECT sequence' : 'SELECT payload_json,sequence'} FROM local_events WHERE id=? AND workspace_id=? AND repository_id=? AND session_id=?`,
+            source.id,
+            context.workspace.id,
+            repository.id,
+            id,
+          );
+          if (!row) throw invalidEvidence();
+          const event = cached ?? parse<CapturedEvent>(row['payload_json']);
+          if (
+            event.eventId !== source.id ||
+            event.repositoryId !== repository.id ||
+            event.sessionId !== id ||
+            !Number.isSafeInteger(event.sequence) ||
+            event.sequence < 1 ||
+            event.sequence !== integer(row, 'sequence')
+          )
+            throw invalidEvidence();
+          events.set(event.eventId, event);
+        }
+      }
+      const ordered = [...events.values()].sort((left, right) => left.sequence - right.sequence);
+      if (
+        ordered.length > 140 ||
+        ordered.length > recapEvidence.totalEventCount ||
+        ordered.some(
+          (event, index) =>
+            event.sessionId !== id ||
+            event.repositoryId !== repository.id ||
+            !Number.isSafeInteger(event.sequence) ||
+            event.sequence < 1 ||
+            !uuid.test(event.eventId) ||
+            (index > 0 && event.sequence <= ordered[index - 1]!.sequence),
+        )
+      )
+        throw invalidEvidence();
       return {
-        session,
-        events: rows.map((row) => parse<CapturedEvent>(row['payload_json'])),
-        totalEventCount,
+        repository,
+        recapEvidence,
+        notes,
+        totalNoteCount,
+        events: ordered,
+        totalEventCount: recapEvidence.totalEventCount,
       };
     }, 'read');
   }

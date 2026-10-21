@@ -4,7 +4,15 @@ This is the original dependency-ordered plan for the full hosted product. The co
 
 ## Current local baseline
 
-The repository implements a Next.js interface, authenticated loopback API, local SQLite evidence/job storage, command wrapper/outbox, sessions, cited recall and read-only MCP retrieval tools. Investigation history is paged; deterministic recaps and separate user-authored journal entries preserve observations and attributed decisions. Default memory processing produces labeled observations; optional HTTP AI requires deliberate configuration. GitHub context supports explicit bounded imports through a configured private GitHub App or authenticated local `gh`; live App registration/consent and continuous synchronization remain separate. The draft PostgreSQL schema is not an applied migration. The stages below remain the full product's delivery and acceptance plan; code presence is not proof that their gates have passed.
+The repository implements a Next.js interface, authenticated loopback API, local SQLite evidence/job storage, command wrapper/outbox, sessions, cited recall and read-only MCP retrieval tools. Investigation history is paged; deterministic recaps and separate user-authored journal entries preserve observations and attributed decisions. Personal handover preview/download combines a bounded recap with the latest authored notes and their original command citations; website/CLI export files while MCP exposes a bounded preview. Default memory processing produces labeled observations; optional HTTP AI requires deliberate configuration. GitHub context supports explicit bounded imports through a configured private GitHub App or authenticated local `gh`; live App registration/consent and continuous synchronization remain separate. The draft PostgreSQL schema is not an applied migration. The stages below remain the full product's delivery and acceptance plan; code presence is not proof that their gates have passed.
+
+### Personal handover scope and acceptance
+
+The implemented report reads one authorized SQLite snapshot without writes, provider calls or an additional migration. Recap selection is all events through 40, otherwise first 20/last 20. The latest ten current-generation notes retain every cited same-session event, giving at most 140 unique ordered events. Recap counts and full-report coverage stay distinct. Selected note bodies remain complete; normalized/redacted event excerpts adapt while keeping IDs and offline citation membership.
+
+Acceptance must demonstrate authorized/empty/denied/deleted behavior, no dangling or foreign citations, correct omissions and bounded membership, read-only processing and shared website/CLI/MCP contracts. Compact report JSON is capped at 2 MiB, pretty JSON/Markdown downloads at 8 MiB, and the explicitly shortened MCP preview at 96 KiB. CLI output files use exclusive creation. Record actual checks separately; size bounds do not establish latency or scale results.
+
+Saved reports are independent copies that later deletion or disconnect cannot revoke. They can contain private evidence and need review before sharing. This personal report excludes repository-file contents and derived memories; it is not a full backup or delivery of the company ownership/permissions/offboarding stage.
 
 ## Stage 1 — Contracts and durable ownership
 
@@ -57,7 +65,7 @@ Gate: explicit measured results with environment noted; no unsupported speed cla
 ## Next releases
 
 1. Interactive PTY/ConPTY with reliable command boundaries and merged-stream labeling; preserve wrapper mode.
-2. Company-owned workspaces, membership/roles, handover/offboarding and retention policy designed before sharing personal data.
+2. Company-owned workspaces, membership/roles, managed handover/offboarding and retention policy designed before sharing personal data; the personal portable report does not provide recipient authorization or revocable copies.
 3. Rich code-review, incident and upgrade views backed by actual evidence rather than generated dashboard metrics.
 4. Remote MCP with a reviewed transport/authorization design.
 5. Extract enrichment or ingestion services only after measured scale, isolation or ownership needs justify them.

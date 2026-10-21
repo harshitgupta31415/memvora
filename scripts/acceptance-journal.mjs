@@ -10,12 +10,13 @@ import {
   SessionNoteResponseSchema,
   SessionNotesPageSchema,
   RecallAnswerSchema,
+  SessionHandoverSchema,
 } from '../packages/contracts/dist/index.js';
 import { SqliteEvidenceStore } from '../packages/db/dist/index.js';
 import { LocalMemvora } from '../packages/core/dist/index.js';
 import { buildApp } from '../apps/api/dist/app.js';
 
-// Isolated synthetic command metadata tests journal contracts; no real user evidence is loaded.
+// Isolated synthetic command metadata tests journal and handover contracts; no user evidence is loaded.
 const root = resolve(import.meta.dirname, '..');
 const token = randomBytes(32).toString('hex');
 const store = new SqliteEvidenceStore(':memory:');
@@ -51,7 +52,7 @@ async function runCli(args, environment) {
   const timer = setTimeout(() => child.kill(), 20_000);
   try {
     const [code] = await once(child, 'exit');
-    assert.equal(code, 0, 'Compiled journal CLI failed.');
+    assert.equal(code, 0, 'Compiled journal/handover CLI failed.');
     assert.ok(!stderr.includes(token));
     return JSON.parse(stdout);
   } finally {
@@ -84,6 +85,15 @@ function call(method, params) {
   });
 }
 try {
+  const inertAuthorText =
+    '<script>globalThis.journalHandoverAuthorFixtureMustRemainInert=true</script>';
+  const inertOutputText =
+    '<script>globalThis.journalHandoverOutputFixtureMustRemainInert=true</script>';
+  function assertNoSecrets(value) {
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    for (const secret of [token, 'private-fixture-secret', 'private-fixture-output-secret'])
+      assert.ok(!text.includes(secret), 'A credential or unredacted fixture secret was exposed.');
+  }
   const repository = service.createRepository({ name: 'Isolated journal acceptance fixture' });
   const session = store.createSession(service.context(), {
     repositoryId: repository.id,
@@ -101,7 +111,13 @@ try {
     git: { commitSha: null, dirty: false },
     outcome: { kind: 'incomplete', exitCode: null, signal: null },
     capture: { complete: false, truncatedBytes: 0, redacted: true },
-    output: [],
+    output: [
+      {
+        stream: 'stderr',
+        ordinal: 0,
+        text: `HandoverAcceptanceOutputMarker: labeled synthetic output, not an executed command. ${inertOutputText}\npassword=private-fixture-output-secret`,
+      },
+    ],
     diffs: [],
   };
   service.ingest([event]);
@@ -178,7 +194,7 @@ try {
   const input = {
     id,
     kind: 'decision',
-    body: 'JournalAcceptanceMarker: this is an explicit test author statement. pass\u0000word=private-fixture-secret',
+    body: `JournalAcceptanceMarker: this is an explicit test author statement. pass\u0000word=private-fixture-secret\n${inertAuthorText}`,
     eventIds: [event.eventId],
   };
   const path = `/api/sessions/${session.id}/notes`;
@@ -290,7 +306,12 @@ try {
   });
   mcp.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
   const list = await call('tools/list', {});
-  for (const name of ['get_session_notes', 'get_session_note', 'search_session_notes'])
+  for (const name of [
+    'get_session_notes',
+    'get_session_note',
+    'search_session_notes',
+    'get_session_handover',
+  ])
     assert.ok(list.tools.some((tool) => tool.name === name && tool.annotations?.readOnlyHint));
   async function tool(name, args) {
     const result = await call('tools/call', { name, arguments: args });
@@ -316,11 +337,210 @@ try {
     limit: 5,
   });
   assert.deepEqual(empty.items, []);
+
+  // Reuse these live transports to prove the portable report remains a read-only projection.
+  const beforeHandover = store.dashboard(service.context());
+  const beforeJournal = store.sessionNotes(service.context(), session.id, { limit: 50 });
+  const handoverPath = `/v1/sessions/${session.id}/handover`;
+  const downloadPath = `/api/sessions/${session.id}/handover`;
+  await request(api, handoverPath, { expected: 401 });
+  await request(api, `${handoverPath}/download?format=json`, { expected: 401 });
+  const handover = await request(api, handoverPath, { authenticated: true });
+  assert.ok(Check(SessionHandoverSchema, handover));
+  assert.equal(handover.session.id, session.id);
+  assert.equal(handover.repository.id, repository.id);
+  assert.deepEqual(
+    handover.events.map((item) => item.eventId),
+    [event.eventId],
+  );
+  assert.deepEqual(new Set(handover.notes.map((note) => note.id)), new Set([id, retryId]));
+  assert.equal(handover.coverage.totalEvents, 1);
+  assert.equal(handover.coverage.includedEvents, 1);
+  assert.equal(handover.coverage.omittedEvents, 0);
+  assert.equal(handover.coverage.totalNotes, 2);
+  assert.equal(handover.coverage.includedNotes, 2);
+  assert.equal(handover.coverage.omittedNotes, 0);
+  assert.equal(handover.coverage.repositoryFilesIncluded, false);
+  assert.equal(handover.coverage.derivedMemoriesIncluded, false);
+  assert.ok(Buffer.byteLength(JSON.stringify(handover), 'utf8') <= handover.serializedByteLimit);
+  const includedEventIds = new Set(handover.events.map((item) => item.eventId));
+  for (const source of [
+    ...handover.recap.sources,
+    ...handover.notes.flatMap((note) => note.sources),
+  ]) {
+    assert.equal(source.kind, 'event');
+    assert.equal(source.repositoryId, repository.id);
+    assert.ok(includedEventIds.has(source.id), 'A handover citation has no included event.');
+  }
+  for (const step of handover.recap.steps) assert.ok(includedEventIds.has(step.eventId));
+  for (const item of [...handover.events, ...handover.notes]) {
+    assert.equal(item.repositoryId, repository.id);
+    assert.equal(item.sessionId, session.id);
+  }
+  assertNoSecrets(handover);
+
+  const handoverHtml = await fetch(`${web}/sessions/${session.id}/handover`, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
+  }).then((response) => {
+    assert.equal(response.status, 200);
+    return response.text();
+  });
+  for (const marker of [
+    'Investigation handover',
+    'Portable report coverage',
+    'JournalAcceptanceMarker',
+    'HandoverAcceptanceOutputMarker',
+    'Download Markdown',
+    'Download JSON',
+  ])
+    assert.ok(handoverHtml.includes(marker));
+  assert.ok(handoverHtml.includes('not independently verified'));
+  assert.ok(
+    handoverHtml.includes(
+      '&lt;script&gt;globalThis.journalHandoverAuthorFixtureMustRemainInert=true&lt;/script&gt;',
+    ),
+  );
+  assert.ok(
+    handoverHtml.includes(
+      '&lt;script&gt;globalThis.journalHandoverOutputFixtureMustRemainInert=true&lt;/script&gt;',
+    ),
+  );
+  assert.ok(!handoverHtml.includes(inertAuthorText));
+  assert.ok(!handoverHtml.includes(inertOutputText));
+  assert.ok(handoverHtml.includes(`/events/${event.eventId}`));
+  assert.ok(handoverHtml.includes(`/notes/${id}`));
+  assertNoSecrets(handoverHtml);
+
+  for (const format of ['json', 'markdown']) {
+    const response = await fetch(`${web}${downloadPath}?format=${format}`, {
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers.get('content-disposition'),
+      `attachment; filename="memvora-handover-${session.id}.${format === 'json' ? 'json' : 'md'}"`,
+    );
+    assert.equal(
+      response.headers.get('content-type'),
+      `${format === 'json' ? 'application/json' : 'text/markdown'}; charset=utf-8`,
+    );
+    assert.match(response.headers.get('cache-control') ?? '', /no-store/u);
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+    const content = await response.text();
+    assertNoSecrets(content);
+    if (format === 'json') {
+      const downloaded = JSON.parse(content);
+      assert.ok(Check(SessionHandoverSchema, downloaded));
+      assert.equal(downloaded.session.id, session.id);
+      assert.deepEqual(downloaded.coverage, handover.coverage);
+      assert.deepEqual(
+        downloaded.events.map((item) => item.eventId),
+        handover.events.map((item) => item.eventId),
+      );
+    } else {
+      assert.ok(content.includes('JournalAcceptanceMarker'));
+      assert.ok(content.includes('HandoverAcceptanceOutputMarker'));
+      assert.ok(content.includes(session.id));
+    }
+  }
+  for (const suffix of ['?format=html', '?format=json&format=markdown', '?format=json&extra=true'])
+    await request(web, `${downloadPath}${suffix}`, { expected: 400 });
+  await request(web, '/api/sessions/not-a-uuid/handover?format=json', { expected: 400 });
+
+  const cliHandover = await runCli(
+    ['session', 'export', session.id, '--format', 'json'],
+    environment,
+  );
+  assert.ok(Check(SessionHandoverSchema, cliHandover));
+  assert.equal(cliHandover.session.id, session.id);
+  assert.deepEqual(cliHandover.coverage, handover.coverage);
+  assert.deepEqual(
+    cliHandover.events.map((item) => item.eventId),
+    handover.events.map((item) => item.eventId),
+  );
+  assert.deepEqual(
+    cliHandover.notes.map((note) => note.id),
+    handover.notes.map((note) => note.id),
+  );
+  assertNoSecrets(cliHandover);
+
+  const preview = await tool('get_session_handover', { id: session.id });
+  assert.equal(preview.fullReportIncluded, false);
+  assert.equal(preview.session.id, session.id);
+  assert.equal(preview.repository.id, repository.id);
+  assert.deepEqual(preview.coverage, handover.coverage);
+  assert.deepEqual(
+    preview.events.map((item) => item.eventId),
+    handover.events.map((item) => item.eventId),
+  );
+  assert.deepEqual(
+    preview.notes.map((note) => note.id),
+    handover.notes.map((note) => note.id),
+  );
+  assert.deepEqual(
+    preview.recap.eventIds,
+    handover.recap.steps.map((step) => step.eventId),
+  );
+  assert.deepEqual(preview.recap.sources, handover.recap.sources);
+  for (const note of preview.notes)
+    assert.deepEqual(note.sources, handover.notes.find((item) => item.id === note.id).sources);
+  assert.equal(preview.outputExcerptsIncluded, false);
+  assert.equal(preview.diffTextIncluded, false);
+  assert.equal(preview.excerpted, true);
+  assert.ok(preview.events.every((item) => !('outputExcerpt' in item) && !('diffs' in item)));
+  assert.equal(preview.fullReportDownload.json, `${handoverPath}/download?format=json`);
+  assert.equal(preview.fullReportDownload.markdown, `${handoverPath}/download?format=markdown`);
+  assert.ok(preview.fullReportDownload.cli.includes(session.id));
+  assert.ok(preview.fullReportDownload.cli.includes('session export'));
+  assertNoSecrets(preview);
+  assert.deepEqual(
+    store.dashboard(service.context()),
+    beforeHandover,
+    'Handover reads changed evidence, memory, or job state.',
+  );
+  assert.deepEqual(
+    store.sessionNotes(service.context(), session.id, { limit: 50 }),
+    beforeJournal,
+    'Handover reads changed author reports.',
+  );
+
   store.deleteSession(service.context(), session.id);
   await request(api, `/v1/session-notes/${id}`, { expected: 404, authenticated: true });
+  for (const path of [
+    handoverPath,
+    `${handoverPath}/download?format=json`,
+    `${handoverPath}/download?format=markdown`,
+  ]) {
+    const deleted = await request(api, path, { expected: 404, authenticated: true });
+    assert.ok(!('events' in deleted) && !('content' in deleted));
+    assert.ok(!JSON.stringify(deleted).includes('JournalAcceptanceMarker'));
+    assertNoSecrets(deleted);
+  }
+  for (const format of ['json', 'markdown']) {
+    const deleted = await fetch(`${web}${downloadPath}?format=${format}`, {
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+    });
+    assert.equal(deleted.status, 404);
+    assert.equal(deleted.headers.get('content-disposition'), null);
+    const body = await deleted.text();
+    assert.ok(!body.includes('JournalAcceptanceMarker'));
+    assert.ok(!body.includes('HandoverAcceptanceOutputMarker'));
+    assertNoSecrets(body);
+  }
+  const deletedPreview = await call('tools/call', {
+    name: 'get_session_handover',
+    arguments: { id: session.id },
+  });
+  assert.equal(deletedPreview.isError, true);
+  assert.ok(!JSON.stringify(deletedPreview).includes('JournalAcceptanceMarker'));
+  assertNoSecrets(deletedPreview);
   const report = {
     completedAt: new Date().toISOString(),
-    mode: 'isolated_synthetic_journal_fixture',
+    mode: 'isolated_synthetic_journal_handover_fixture',
     checks: [
       'browser_same_origin',
       'redaction',
@@ -331,7 +551,14 @@ try {
       'ask_author_citations',
       'compiled_note_page',
       'real_mcp_stdio',
+      'handover_consistent_projection_and_citation_closure',
+      'compiled_handover_page_inert_content',
+      'handover_download_attachments_and_boundaries',
+      'compiled_cli_full_json_handover',
+      'mcp_read_only_handover_preview',
+      'handover_reads_do_not_write',
       'parent_deletion',
+      'deleted_handover_and_downloads_denied',
     ],
     notice:
       'In-memory isolated store and labeled synthetic execution metadata. No user evidence, GitHub service or AI provider was loaded or modified.',

@@ -36,6 +36,9 @@ import {
   SessionNotesQuerySchema,
   SessionNoteSearchResponseSchema,
   SessionRecapSchema,
+  SessionHandoverSchema,
+  SessionHandoverDownloadSchema,
+  SessionHandoverDownloadQuerySchema,
   SessionEventsPageSchema,
   SessionEventsQuerySchema,
   SessionListSchema,
@@ -47,6 +50,8 @@ import {
   captureLimits,
   DomainError,
   deriveSessionRecap,
+  deriveSessionHandover,
+  formatSessionHandoverMarkdown,
   getSystemStatus,
   LocalMemvora,
   observedLabel,
@@ -279,6 +284,55 @@ export function buildApp(options: AppOptions = {}) {
     },
     async (request) =>
       deriveSessionRecap(store.getSessionRecapEvidence(service.context(), request.params.id)),
+  );
+  app.get(
+    '/v1/sessions/:id/handover',
+    {
+      schema: {
+        params: idParams,
+        querystring: Type.Object({}, { additionalProperties: false }),
+        response: { 200: SessionHandoverSchema },
+      },
+    },
+    async (request, reply) => {
+      reply.header('cache-control', 'no-store');
+      return deriveSessionHandover(
+        store.getSessionHandoverEvidence(service.context(), request.params.id),
+      );
+    },
+  );
+  app.get(
+    '/v1/sessions/:id/handover/download',
+    {
+      schema: {
+        params: idParams,
+        querystring: SessionHandoverDownloadQuerySchema,
+        response: { 200: SessionHandoverDownloadSchema },
+      },
+    },
+    async (request, reply) => {
+      const report = deriveSessionHandover(
+        store.getSessionHandoverEvidence(service.context(), request.params.id),
+      );
+      const format = request.query.format ?? 'markdown';
+      const content =
+        format === 'json'
+          ? `${JSON.stringify(report, null, 2)}\n`
+          : formatSessionHandoverMarkdown(report);
+      if (Buffer.byteLength(content, 'utf8') > 8 * 1024 * 1024)
+        throw new DomainError(
+          'HANDOVER_TOO_LARGE',
+          'The download exceeds the portable file size limit.',
+          413,
+        );
+      reply.header('cache-control', 'no-store');
+      return {
+        format,
+        filename: `memvora-handover-${report.session.id}.${format === 'json' ? 'json' : 'md'}`,
+        mediaType: format === 'json' ? ('application/json' as const) : ('text/markdown' as const),
+        content,
+      };
+    },
   );
   app.get(
     '/v1/sessions/:id/notes',

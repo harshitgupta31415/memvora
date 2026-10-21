@@ -47,6 +47,25 @@ With a bound local capture, omit the ID to read its current investigation. An ex
 
 With the compiled app running and an existing investigation containing at least three commands, `npm run acceptance:recap` checks API, CLI and real MCP agreement against original event UUIDs. It inserts no evidence or answer and verifies the evidence/processing counts remain unchanged. The ignored report is `.memvora/recap-acceptance.json`.
 
+### Personal portable handover
+
+Open an investigation's **Handover report** to preview `/sessions/[id]/handover`, then download Markdown or JSON. This combines observed command evidence with the latest authored notes without treating those notes as independently verified facts. Each preview/download computes a fresh authorized snapshot; later uploads or notes can change the next report.
+
+The report reads existing SQLite data in one transaction. It includes the recap's all-through-40 or first-20/last-20 selection, the latest ten current-generation notes, and every original same-session command cited by those notes. Additional linked commands can come from the omitted middle. Event membership is deduplicated and ordered, at most 140; note bodies retain their complete normalized/redacted text. Embedded note/event UUIDs preserve offline citation resolution. Outcome counts belong to the recap's selected events, while report coverage separately counts all embedded events and omitted notes/events. Repository-file contents and derived memories are excluded.
+
+This computation writes no database records, starts no jobs and calls no AI or GitHub provider. It needs no additional migration beyond existing capture/journal storage. Commands, working paths, output and diff text are normalized, defensively redacted and safely excerpted; explicit flags separate export clipping from original capture truncation. Adaptive output/diff limits preserve IDs, citations and membership while keeping compact report JSON within 2 MiB. Pretty JSON and Markdown files have a separate 8 MiB download cap. A size cap is not a performance guarantee.
+
+```powershell
+node apps/cli/dist/index.js session export <session-id> --format markdown
+node apps/cli/dist/index.js session export <session-id> --format json --output .\investigation-handover.json
+```
+
+Without an ID, CLI uses the current bound investigation; an explicit ID uses the configured local connection. Markdown is the default format. With no `--output`, validated file content goes to stdout. `--output` requires an existing parent directory, creates a new file exclusively and refuses to overwrite existing files or symlinks. A failed disk write may leave a new partial file for manual review. It does not automatically open, execute or upload the report.
+
+MCP `get_session_handover({id})` provides a read-only preview under a 96 KiB response budget, preserving every event/note/source ID and coverage while disclosing further excerpt shortening. It explicitly omits output/diff text, working directories and detailed event timestamps/signals/errors; `fullReportIncluded` is false. It does not create a downloadable file; use the website or CLI for that. Original API locators still refer to this local instance, while the report's embedded records resolve its included citations offline.
+
+A download is an independent personal copy. Later deletion, disconnect or access changes in Memvora cannot remove or update saved copies. Review private output/code and possible undetected secrets before sharing. This bounded report is not a complete backup or repository export, and does not implement company ownership, recipient access controls or offboarding revocation.
+
 ## 2. Start development
 
 Prerequisites: Windows PowerShell, Node 24 or 26 and npm 11+. The Git executable adds commit/dirty/diff provenance. GitHub CLI is optional until importing GitHub context. No local AI model, GPU workload or external database is needed for capture and observed recall.
@@ -166,18 +185,19 @@ Known credential patterns, the local token, password/token arguments and private
 
 ## 6. Website routes
 
-| Route                | Purpose                                                                      |
-| -------------------- | ---------------------------------------------------------------------------- |
-| `/`                  | Counts and recent recorded work in the local workspace.                      |
-| `/repositories`      | Explicit local registration plus optional GitHub browsing/import.            |
-| `/repositories/[id]` | Repository details, imported context and relevant sessions.                  |
-| `/sessions`          | Investigation list.                                                          |
-| `/sessions/[id]`     | Captured attempts and generated/observed memories.                           |
-| `/events/[id]`       | Original command, outcome, output and tracked diffs.                         |
-| `/memories/[id]`     | Summary, mode, steps, uncertainty and source links.                          |
-| `/ask`               | Source-linked recall with repository filtering.                              |
-| `/jobs`              | Scoped processing states, attempt history and explicit failed-summary retry. |
-| `/settings`          | Actual local storage/enrichment settings, limits and connection diagnostics. |
+| Route                     | Purpose                                                                      |
+| ------------------------- | ---------------------------------------------------------------------------- |
+| `/`                       | Counts and recent recorded work in the local workspace.                      |
+| `/repositories`           | Explicit local registration plus optional GitHub browsing/import.            |
+| `/repositories/[id]`      | Repository details, imported context and relevant sessions.                  |
+| `/sessions`               | Investigation list.                                                          |
+| `/sessions/[id]`          | Captured attempts and generated/observed memories.                           |
+| `/sessions/[id]/handover` | Personal report preview, coverage and Markdown/JSON downloads.               |
+| `/events/[id]`            | Original command, outcome, output and tracked diffs.                         |
+| `/memories/[id]`          | Summary, mode, steps, uncertainty and source links.                          |
+| `/ask`                    | Source-linked recall with repository filtering.                              |
+| `/jobs`                   | Scoped processing states, attempt history and explicit failed-summary retry. |
+| `/settings`               | Actual local storage/enrichment settings, limits and connection diagnostics. |
 
 The first-run workspace is empty. Counts and memories reflect stored data, not showcase samples. Processing may briefly lag ingestion. A failed provider job leaves raw event detail available. Open Memory processing to filter by repository, investigation or state. Failed summaries can be retried explicitly after fixing their configuration; running, queued and ready jobs cannot be reset. Each cycle has three automatic attempts, and manual retry counts remain visible. A retry uses the same accepted evidence and the current summary configuration, which can send it to a configured AI endpoint again.
 
@@ -244,13 +264,13 @@ Build services, then configure the MCP host to launch direct Node with the absol
 }
 ```
 
-Host configuration details vary by client. Available tools include `memvora_status`, `search_memory(query, repositoryIds?, limit?)`, `get_memory(id)` and `get_session_context(id, cursor?, limit?)`, plus the imported-source tools described in the adapter guide. They use the API, retain source IDs and return bounded excerpts. Session context returns snapshot page metadata so earlier work can be retrieved through `olderCursor` instead of stopping at 100 events. No tool runs commands or edits code. Diagnostic output uses stderr. See [the adapter guide](../apps/mcp/README.md).
+Host configuration details vary by client. Available tools include `memvora_status`, `search_memory(query, repositoryIds?, limit?)`, `get_memory(id)`, `get_session_context(id, cursor?, limit?)` and the read-only `get_session_handover` preview, plus the imported-source tools described in the adapter guide. They use the API, retain source IDs and return bounded excerpts. Session context returns snapshot page metadata so earlier work can be retrieved through `olderCursor` instead of stopping at 100 events. No tool runs commands or edits code. Diagnostic output uses stderr. See [the adapter guide](../apps/mcp/README.md).
 
 For custom configuration, set `MEMVORA_API_URL` and the absolute `MEMVORA_DATA_DIR` in the MCP server environment. The adapter does not load the root `.env`. If the API uses an explicit `MEMVORA_LOCAL_TOKEN` override, provide that same value through the host's private environment/secret settings; never commit it in the JSON configuration.
 
 ## 10. Current local routes versus hosted target
 
-The current API implements `/health`, `/v1/system/status`, `/ready`, `/v1/me`, dashboard/settings, repository registration/list/detail, session creation/list/detail/close, event batch/detail, memory search/detail, imported-source search/ranged detail, ask, scoped processing-job lists, failed-job retry and guarded local deletion actions. GitHub integration adds status, paginated repository browsing, explicit import and stored-context detail. Exact schemas are in `packages/contracts/src/local.ts`; route behavior is in `apps/api/src/app.ts` and `apps/api/src/integrations/github.ts`.
+The current API implements `/health`, `/v1/system/status`, `/ready`, `/v1/me`, dashboard/settings, repository registration/list/detail, session creation/list/detail/close, paged history, recaps, immutable journal entries, personal handover preview/download, event batch/detail, memory search/detail, imported-source search/ranged detail, ask, scoped processing-job lists, failed-job retry and guarded local deletion actions. GitHub integration adds status, paginated repository browsing, explicit import and stored-context detail. Exact schemas are in `packages/contracts/src/local.ts`; route behavior is in `apps/api/src/app.ts` and `apps/api/src/integrations/github.ts`.
 
 Local protection uses the bearer credential, loopback checks, repository/workspace scope and deletion fences. It is not a substitute for hosted users, organization roles, GitHub App revocation synchronization or remote MCP authorization. Remaining hosted work includes PostgreSQL migration, pg-boss integration, pgvector retrieval, per-device credentials, browser sessions/CSRF design, OS credential storage, company ownership, operational retention and public deployment readiness. Keep those original acceptance gates in the PRD/roadmap.
 
