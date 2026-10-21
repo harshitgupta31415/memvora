@@ -130,6 +130,8 @@ const sourceHistoryLimits = { textBytes: 32 * 1024 * 1024, versions: 2_000 } as 
 const sourceLines = (text: string): string[] =>
   text.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line));
 function literalSearchTerms(query: string): string[] {
+  if (typeof query !== 'string' || query.length > 2_000)
+    throw new DomainError('INVALID_QUERY', 'A bounded text search query is required.');
   const stop = new Set([
     'how',
     'did',
@@ -154,7 +156,7 @@ function literalSearchTerms(query: string): string[] {
   if (!normalized) throw new DomainError('INVALID_QUERY', 'A search query is required.');
   const terms = [
     ...new Set(normalized.split(/\s+/).filter((term) => term && !stop.has(term))),
-  ].slice(0, 12);
+  ].slice(0, 64);
   return terms.length ? terms : [normalized];
 }
 function boundedExcerpt(lines: string[], startLine: number, limit: number) {
@@ -1597,37 +1599,10 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
         for (const id of repositoryIds) this.repositoryRow(context, id);
         if (!repositoryIds.length) return [];
       }
-      const stop = new Set([
-        'how',
-        'did',
-        'i',
-        'the',
-        'a',
-        'an',
-        'and',
-        'or',
-        'to',
-        'was',
-        'is',
-        'it',
-        'what',
-        'why',
-        'my',
-        'we',
-        'fix',
-        'fixed',
-      ]);
-      if (typeof input.query !== 'string' || input.query.length > 2000)
-        throw new DomainError('INVALID_QUERY', 'A bounded text search query is required.');
       const limit = Math.min(input.limit ?? 10, 20);
       if (!Number.isSafeInteger(limit) || limit < 1)
         throw new DomainError('INVALID_QUERY', 'The search limit must be a positive integer.');
-      const query = input.query.trim().toLowerCase();
-      if (!query) throw new DomainError('INVALID_QUERY', 'A search query is required.');
-      const words = [
-        ...new Set(query.split(/\s+/).filter((word) => word && !stop.has(word))),
-      ].slice(0, 12);
-      const terms = words.length ? words : [query];
+      const terms = literalSearchTerms(input.query);
       // Every token is a quoted literal: user text cannot add FTS operators or column selectors.
       const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(' OR ');
       const scope = `${eventAccessScope}${repositoryIds ? ` AND e.repository_id IN (${repositoryIds.map(() => '?').join(',')})` : ''}${sessionId ? ' AND e.session_id=?' : ''}`;
