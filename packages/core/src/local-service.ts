@@ -303,7 +303,7 @@ export function deriveObservedMemory(event: CapturedEvent): Memory {
     steps.push({ text: `Recorded output:\n${output}`, sourceIds: [event.eventId] });
   if (event.diffs.length)
     steps.push({
-      text: 'A bounded Git diff snapshot is attached to the source event; this alone does not establish which change caused the outcome.',
+      text: 'Bounded HEAD-relative Git snapshots are attached to the source event. They may include pre-existing changes and do not identify precise per-command changes or establish which change caused the outcome.',
       sourceIds: [event.eventId],
     });
   const uncertainty = [
@@ -311,8 +311,12 @@ export function deriveObservedMemory(event: CapturedEvent): Memory {
     'A zero exit code or successful check alone does not prove the original issue was resolved.',
   ];
   if (!event.capture.complete || event.capture.truncatedBytes > 0)
-    uncertainty.push('Captured output is incomplete or truncated; inspect capture metadata.');
+    uncertainty.push('Captured evidence is incomplete or truncated; inspect capture metadata.');
   if (event.git.error) uncertainty.push('Some Git state could not be read during capture.');
+  if (event.diffs.some((diff) => diff.truncatedBytes > 0))
+    uncertainty.push(
+      'Attached Git snapshot text was truncated; missing changes cannot be compared.',
+    );
   return {
     id: event.eventId,
     repositoryId: event.repositoryId,

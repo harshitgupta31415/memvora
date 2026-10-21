@@ -5,44 +5,14 @@ import { delimiter, dirname, join } from 'node:path';
 import type { CapturedEvent } from '@memvora/contracts';
 import { LocalOutbox, type OutboxFilter } from './local.js';
 import { redactArguments, redactText, StreamRedactor } from './redaction.js';
+import { gitText, type GitProbeResult } from './git-probe.js';
+export { gitText } from './git-probe.js';
 
 const OUTPUT_LIMIT = 128 * 1024;
 const DIFF_LIMIT = 32 * 1024;
 const TEXT_CHUNK_LIMIT = 8 * 1024;
 const COMMAND_JSON_LIMIT = 128 * 1024;
 export const FINAL_EVENT_JSON_LIMIT = 480 * 1024;
-
-export async function gitText(
-  cwd: string,
-  args: string[],
-  limit = DIFF_LIMIT,
-): Promise<{ text: string; truncatedBytes: number; ok: boolean }> {
-  return new Promise((resolve) => {
-    const child = spawn('git', args, {
-      cwd,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const chunks: Buffer[] = [];
-    let stored = 0;
-    let truncatedBytes = 0;
-    child.stdout.on('data', (chunk: Buffer) => {
-      const available = Math.max(0, limit - stored);
-      if (available) chunks.push(chunk.subarray(0, available));
-      stored += Math.min(available, chunk.length);
-      truncatedBytes += Math.max(0, chunk.length - available);
-    });
-    const timer = setTimeout(() => child.kill(), 10_000);
-    child.once('error', () => {
-      clearTimeout(timer);
-      resolve({ text: '', truncatedBytes: 0, ok: false });
-    });
-    child.once('close', (code) => {
-      clearTimeout(timer);
-      resolve({ text: Buffer.concat(chunks).toString('utf8'), truncatedBytes, ok: code === 0 });
-    });
-  });
-}
 
 export function resolveInvocation(
   executable: string,
@@ -156,40 +126,49 @@ export function fitEventEnvelope(event: CapturedEvent): CapturedEvent {
 async function snapshotDiff(
   cwd: string,
   token: string,
-): Promise<{ text: string; truncatedBytes: number }> {
-  const result = await gitText(cwd, [
-    'diff',
-    'HEAD',
-    '--no-ext-diff',
-    '--no-color',
-    '--',
-    '.',
-    ':(exclude)**/.env*',
-    ':(exclude).env*',
-    ':(exclude)**/*.pem',
-    ':(exclude)**/*.key',
-    ':(exclude)**/credentials*',
-    ':(exclude)**/.npmrc',
-    ':(exclude)**/.pypirc',
-    ':(exclude)**/.netrc',
-    ':(exclude)**/id_rsa*',
-    ':(exclude)**/id_ed25519*',
-    ':(exclude)**/.memvora/**',
-    ':(exclude).memvora/**',
-  ]);
-  return { text: redactText(result.text, [token]), truncatedBytes: result.truncatedBytes };
+  git: typeof gitText,
+): Promise<GitProbeResult> {
+  const result = await git(
+    cwd,
+    [
+      'diff',
+      'HEAD',
+      '--no-ext-diff',
+      '--no-textconv',
+      '--no-color',
+      '--',
+      '.',
+      ':(exclude,glob,icase)**/.env*',
+      ':(exclude,glob,icase)**/*.pem',
+      ':(exclude,glob,icase)**/*.key',
+      ':(exclude,glob,icase)**/credentials*',
+      ':(exclude,glob,icase)**/.npmrc',
+      ':(exclude,glob,icase)**/.pypirc',
+      ':(exclude,glob,icase)**/.netrc',
+      ':(exclude,glob,icase)**/id_rsa*',
+      ':(exclude,glob,icase)**/id_ed25519*',
+      ':(exclude,glob,icase)**/.memvora/**',
+    ],
+    DIFF_LIMIT,
+  );
+  return result.ok
+    ? { ...result, text: redactText(result.text, [token]) }
+    : { ...result, text: '', truncatedBytes: 0 };
 }
 
-export async function captureCommand(options: {
-  cwd: string;
-  repositoryId: string;
-  sessionId: string;
-  outbox: LocalOutbox;
-  token: string;
-  command: string[];
-  shell?: string;
-  databasePath: string;
-}): Promise<{ eventId: string; exitCode: number }> {
+export async function captureCommand(
+  options: {
+    cwd: string;
+    repositoryId: string;
+    sessionId: string;
+    outbox: LocalOutbox;
+    token: string;
+    command: string[];
+    shell?: string;
+    databasePath: string;
+  },
+  dependencies: { git?: typeof gitText } = {},
+): Promise<{ eventId: string; exitCode: number }> {
   const executable = options.command[0];
   if (!executable) throw new Error('Provide an executable after --.');
   if (
@@ -211,9 +190,32 @@ export async function captureCommand(options: {
     );
   const eventId = randomUUID();
   const startedAt = new Date().toISOString();
-  const sha = await gitText(options.cwd, ['rev-parse', 'HEAD']);
-  const dirty = await gitText(options.cwd, ['status', '--porcelain'], 1024);
-  const before = await snapshotDiff(options.cwd, options.token);
+  const probe = dependencies.git ?? gitText;
+  const git: typeof gitText = async (cwd, args, limit) => {
+    try {
+      return await probe(cwd, args, limit);
+    } catch {
+      return { text: '', truncatedBytes: 0, ok: false, failure: 'failed' };
+    }
+  };
+  const failures: string[] = [];
+  const recordFailure = (phase: string, result: GitProbeResult): void => {
+    if (!result.ok) failures.push(`${phase} (${result.failure ?? 'failed'})`);
+  };
+  const sha = await git(options.cwd, ['rev-parse', '--verify', 'HEAD']);
+  const commit =
+    sha.ok &&
+    sha.truncatedBytes === 0 &&
+    /^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})$/u.test(sha.text.trim())
+      ? sha.text.trim()
+      : null;
+  if (!commit) recordFailure('HEAD', sha.ok ? { text: '', truncatedBytes: 0, ok: false } : sha);
+  const dirty = await git(options.cwd, ['status', '--porcelain'], 1024);
+  recordFailure('status', dirty);
+  const before = await snapshotDiff(options.cwd, options.token, git);
+  recordFailure('before diff', before);
+  const gitError = () =>
+    failures.length ? `Git evidence unavailable: ${failures.join('; ')}.` : undefined;
   const initial = {
     eventId,
     repositoryId: options.repositoryId,
@@ -226,11 +228,13 @@ export async function captureCommand(options: {
     },
     cwd: options.cwd,
     git: {
-      commitSha: sha.ok ? sha.text.trim() : null,
-      dirty: Boolean(dirty.text.trim()),
-      ...(!sha.ok ? { error: 'Commit metadata unavailable.' } : {}),
+      commitSha: commit,
+      dirty: dirty.ok && Boolean(dirty.text.trim()),
+      ...(gitError() ? { error: gitError()! } : {}),
     },
-    diffs: [{ phase: 'before' as const, ...before }],
+    diffs: before.ok
+      ? [{ phase: 'before' as const, text: before.text, truncatedBytes: before.truncatedBytes }]
+      : [],
   };
   const sequence = options.outbox.begin(eventId, options.sessionId, initial);
   let outputBytes = 0;
@@ -343,7 +347,9 @@ export async function captureCommand(options: {
       },
     };
   }
-  const after = await snapshotDiff(options.cwd, options.token);
+  const after = await snapshotDiff(options.cwd, options.token, git);
+  recordFailure('after diff', after);
+  if (gitError()) initial.git = { ...initial.git, error: gitError()! };
   truncatedBytes += stdout.suppressedBytes + stderr.suppressedBytes;
   const event = fitEventEnvelope({
     ...initial,
@@ -351,12 +357,21 @@ export async function captureCommand(options: {
     endedAt: new Date().toISOString(),
     outcome,
     capture: {
-      complete: !storageError && outcome.kind !== 'interrupted' && truncatedBytes === 0,
+      complete:
+        !storageError &&
+        outcome.kind !== 'interrupted' &&
+        truncatedBytes === 0 &&
+        failures.length === 0,
       truncatedBytes,
       redacted: true,
     },
     output: options.outbox.output(eventId),
-    diffs: [...initial.diffs, { phase: 'after', ...after }],
+    diffs: [
+      ...initial.diffs,
+      ...(after.ok
+        ? [{ phase: 'after' as const, text: after.text, truncatedBytes: after.truncatedBytes }]
+        : []),
+    ],
   });
   options.outbox.finalize(eventId, event);
   if (storageError)

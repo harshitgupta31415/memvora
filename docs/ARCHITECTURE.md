@@ -92,6 +92,8 @@ Direct executable invocation preserves argument arrays. Shell scripts, `.cmd` wr
 
 Redaction needs carryover across chunk boundaries. Apply rules before local persistence, again defensively at ingestion, and before provider submission. Persist redaction/truncation metadata. Output thresholds stop persistence, not stream draining; otherwise the child can deadlock. Process termination and signals need explicit Windows behavior and accurate interrupted status.
 
+The implemented local Git probes use the capture cwd, bounded output/time and fixed failure classifications. Probe failures retain the command outcome, add stage-specific `git.error`, omit failed diff phases and make evidence capture incomplete; an unavailable probe is never synthesized as a successful empty snapshot. Git diagnostics are discarded. Probes remove environment-based Git repository redirection and server credentials, disable optional locks/fsmonitor and external diff/textconv helpers, and do not initiate lazy fetching. Before/after diffs remain bounded, filtered tracked-file snapshots against the then-current HEAD, so pre-existing changes, untracked-file contents and commands that move HEAD limit attribution. Recap comparisons require both untruncated snapshots and no Git error; they describe retained text only. Shared observed memories and recaps disclose incomplete/truncated evidence without inferring a per-command patch or causal fix. This uses existing event fields and adds no schema migration.
+
 ### Transactional ingestion
 
 ```text
