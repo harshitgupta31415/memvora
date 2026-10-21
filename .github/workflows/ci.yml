@@ -32,6 +32,7 @@ jobs:
       - run: npm run acceptance:github-oauth
       - run: npm run acceptance:journal
       - run: npm run acceptance:journal-outbox
+      - run: npm run acceptance:git-baseline
       - run: npm run acceptance:synthesis
       - run: npm run acceptance:directory
       - run: npm run acceptance:setup

@@ -124,6 +124,9 @@ export function deriveSessionHandover(evidence: SessionHandoverEvidence): Sessio
       cwdTruncated: cwd.length > 512,
       git: {
         commitSha: event.git.commitSha,
+        ...(event.git.afterCommitSha === undefined
+          ? {}
+          : { afterCommitSha: event.git.afterCommitSha }),
         dirty: event.git.dirty,
         error: event.git.error === undefined ? null : clip(clean(event.git.error), 200),
       },
@@ -156,7 +159,8 @@ export function deriveSessionHandover(evidence: SessionHandoverEvidence): Sessio
         command: { ...event.command, executable: value.command || '(empty display)', args: [] },
         outcome: { ...event.outcome, signal: value.safe.outcome.signal },
         output: value.output ? [{ stream: 'stdout' as const, ordinal: 0, text: value.output }] : [],
-        diffs: value.diffs,
+        // Compare stored capture text before display normalization can erase differences.
+        diffs: event.diffs,
       };
     }),
   });
@@ -206,7 +210,7 @@ export function deriveSessionHandover(evidence: SessionHandoverEvidence): Sessio
       'The recap covers all attempts up to 40, otherwise the first 20 and last 20. Its counts describe that selection only. Exported events also include every source linked by the latest ten authored notes.',
       'Older notes and remaining middle attempts may be omitted. Repository-file contents and derived memory records are not included. Consult coverage before treating this as complete history.',
       'Authored notes, decisions and reported resolutions are claims by their named author, not independently verified facts. Command success does not establish a root cause or causal fix.',
-      'Commands, paths, output and diffs are display excerpts. Export clipping is separate from original capture truncation. Diff snapshots can include pre-existing changes; displayed command text is not an executable script.',
+      'Commands, paths, output and diffs are display excerpts. Export clipping is separate from capture truncation. Snapshots can include pre-existing changes. Only explicit matching baseline hashes establish a common comparison base; legacy baselines are unknown. HEAD probes are separate observations, not proof of causation. Displayed commands are not executable scripts.',
       'Event IDs and note IDs resolve to records in this file. API locators refer to the originating local instance and may become unavailable. This report includes no repository-file citations.',
       'This file can contain private code or terminal information. Known-pattern redaction is not guaranteed to detect every secret. Review it before sharing. No external upload is performed.',
       'A saved copy does not follow later deletion, disconnection or access changes in the originating database. Its recipient controls that independent copy.',
@@ -220,6 +224,9 @@ export function deriveSessionHandover(evidence: SessionHandoverEvidence): Sessio
       outputTruncated: output.length > limit,
       diffs: diffs.map((diff) => ({
         phase: diff.phase,
+        ...(diff.baselineCommitSha === undefined
+          ? {}
+          : { baselineCommitSha: diff.baselineCommitSha }),
         text: clip(diff.text, limit),
         excerptTruncated: diff.text.length > limit,
         capturedTruncatedBytes: diff.truncatedBytes,

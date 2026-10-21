@@ -1,6 +1,7 @@
 import type { CapturedEvent, SessionRecap } from '@memvora/contracts';
 import { DomainError, redactText } from './local-service.js';
 import type { SessionRecapEvidence } from './local-service.js';
+import { gitDiffSummary } from './git-evidence.js';
 
 function excerpt(value: string, limit: number): string {
   // Evidence may contain terminal escape/control characters. Keep printable text and line breaks.
@@ -31,29 +32,6 @@ function outcome(event: CapturedEvent): string {
     case 'incomplete':
       return 'Run ended without a complete outcome';
   }
-}
-
-function diffSummary(event: CapturedEvent): string {
-  if (!event.diffs.length)
-    return event.git.error
-      ? 'Git probing failed; no diff snapshots were captured.'
-      : 'No diff snapshots were captured.';
-  const before = event.diffs.find((diff) => diff.phase === 'before');
-  const after = event.diffs.find((diff) => diff.phase === 'after');
-  const truncated = event.diffs.some((diff) => diff.truncatedBytes > 0);
-  const parts = event.diffs.map(
-    (diff) =>
-      `${diff.phase === 'before' ? 'Before' : 'After'} HEAD-relative snapshot: ${diff.text ? 'nonempty' : 'empty'}`,
-  );
-  if (before && after && !event.git.error && !truncated)
-    parts.push(
-      before.text === after.text
-        ? 'Snapshot texts match'
-        : 'Snapshot texts differ; inspect the event for details',
-    );
-  if (event.git.error) parts.push('Git probing failed; snapshot comparison unavailable');
-  if (truncated) parts.push('Snapshot text was truncated; full comparison unavailable');
-  return `${parts.join('. ')}.`;
 }
 
 /** Reconstruct observations only. Counts and steps always refer to the disclosed event selection. */
@@ -113,14 +91,14 @@ export function deriveSessionRecap(evidence: SessionRecapEvidence): SessionRecap
       command: excerpt([event.command.executable, ...event.command.args].join(' '), 300),
       outcome: outcome(event),
       outputExcerpt: excerpt(output, 600),
-      diffSummary: diffSummary(event),
+      diffSummary: gitDiffSummary(event),
     };
   });
   const omittedEvents = totalEventCount - events.length;
   const uncertainty = [
     'Commands and outcomes are observations. Engineer intent, root cause and a causal fix are not established by this recap.',
     'A zero exit code records a successful command exit; it does not by itself prove that the underlying issue is resolved.',
-    'Commands and output are shortened excerpts. Git snapshots are relative to HEAD and may include pre-existing changes; they do not isolate changes made by a command. Open each event for the original stored evidence.',
+    'Commands and output are shortened excerpts. Git snapshots can include pre-existing changes and do not isolate command effects. A shared baseline must be explicitly recorded; legacy baselines are unknown. HEAD observations are separate probes, not proof of causation. Open each event for stored evidence.',
   ];
   if (omittedEvents)
     uncertainty.push(

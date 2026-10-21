@@ -14,6 +14,7 @@ import {
   buildSessionSynthesisInput,
   runSessionSynthesisOnce,
   sessionSynthesisInputHash,
+  sessionSynthesisPromptVersion,
   validateSessionSynthesisAnalysis,
   validateSessionSynthesisHistory,
   validateSessionSynthesisPreview,
@@ -147,6 +148,44 @@ function history() {
 }
 
 describe('bounded explicit investigation interpretation', () => {
+  it('preserves observed HEAD and explicit baselines while keeping historical provenance unknown', () => {
+    const f = fixture();
+    const fixed = f.events[0]!;
+    fixed.git.afterCommitSha = 'b'.repeat(40);
+    fixed.diffs = [
+      { phase: 'after', baselineCommitSha: fixed.git.commitSha!, text: 'patch', truncatedBytes: 0 },
+    ];
+    const legacy = f.events[1]!;
+    legacy.diffs = [{ phase: 'after', text: 'old patch', truncatedBytes: 0 }];
+    const { input } = buildSessionSynthesisInput(f.evidence);
+    expect(input.events[0]).toMatchObject({
+      afterCommitSha: 'b'.repeat(40),
+      diffBaselineCommitSha: 'a'.repeat(40),
+    });
+    expect(input.events[0]!.diff).toContain(`baseline ${'a'.repeat(40)}`);
+    expect(input.events[1]!.diffBaselineCommitSha).toBeNull();
+    expect(input.events[1]).not.toHaveProperty('afterCommitSha');
+    expect(input.events[1]!.diff).toContain('baseline not recorded');
+    const hash = sessionSynthesisInputHash(input, configuration, 'same-revision');
+    const changed = structuredClone(input);
+    changed.events[0]!.afterCommitSha = null;
+    expect(sessionSynthesisInputHash(changed, configuration, 'same-revision')).not.toBe(hash);
+  });
+
+  it('reads retained v1 results while requiring stale disclosure under the current v2 prompt', () => {
+    const { response, session } = ready();
+    expect(
+      validateSessionSynthesisResponse(response, session.id).request!.configuration.promptVersion,
+    ).toBe('session-analysis-v1');
+    response.configuration = { ...configuration, promptVersion: sessionSynthesisPromptVersion };
+    expect(sessionSynthesisPromptVersion).toBe('session-analysis-v2');
+    expect(() => validateSessionSynthesisResponse(response, session.id)).toThrow();
+    response.request!.stale = true;
+    expect(
+      validateSessionSynthesisResponse(response, session.id).request!.configuration.promptVersion,
+    ).toBe('session-analysis-v1');
+  });
+
   it('projects original observations and author claims without registration metadata or mutation', () => {
     const f = fixture();
     const event = f.events[0]!;

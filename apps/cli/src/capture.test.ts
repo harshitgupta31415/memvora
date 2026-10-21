@@ -37,7 +37,7 @@ describe('explicit wrapper evidence', () => {
       endedAt: '2026-10-21T10:00:01.000Z',
       command: { executable: 'node', args: ['script.js'], shell: 'direct' },
       cwd: 'C:\\fixture',
-      git: { commitSha: null, dirty: true },
+      git: { commitSha: 'a'.repeat(40), afterCommitSha: 'b'.repeat(40), dirty: true },
       outcome: { kind: 'completed', exitCode: 0, signal: null },
       capture: { complete: true, truncatedBytes: 0, redacted: true },
       output: Array.from({ length: 16 }, (_value, ordinal) => ({
@@ -46,8 +46,18 @@ describe('explicit wrapper evidence', () => {
         text: '\u0001'.repeat(8192),
       })),
       diffs: [
-        { phase: 'before', text: '\\'.repeat(32768), truncatedBytes: 0 },
-        { phase: 'after', text: '😀'.repeat(8192), truncatedBytes: 0 },
+        {
+          phase: 'before',
+          text: '\\'.repeat(32768),
+          truncatedBytes: 0,
+          baselineCommitSha: 'a'.repeat(40),
+        },
+        {
+          phase: 'after',
+          text: '😀'.repeat(8192),
+          truncatedBytes: 0,
+          baselineCommitSha: 'a'.repeat(40),
+        },
       ],
     };
     const outputBytes = event.output.reduce(
@@ -76,6 +86,15 @@ describe('explicit wrapper evidence', () => {
     );
     expect(bounded.command).toEqual({ executable: 'node', args: ['script.js'], shell: 'direct' });
     expect(bounded.outcome.exitCode).toBe(0);
+    expect(bounded.git).toEqual({
+      commitSha: 'a'.repeat(40),
+      afterCommitSha: 'b'.repeat(40),
+      dirty: true,
+    });
+    expect(bounded.diffs.map((diff) => diff.baselineCommitSha)).toEqual([
+      'a'.repeat(40),
+      'a'.repeat(40),
+    ]);
     const outbox = new LocalOutbox(':memory:');
     try {
       outbox.begin(bounded.eventId, bounded.sessionId, {});

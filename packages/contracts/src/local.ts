@@ -5,6 +5,9 @@ const object = <T extends Record<string, Type.TSchema>>(properties: T) =>
 export const uuidPattern =
   '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$';
 export const IdSchema = Type.String({ pattern: uuidPattern });
+// A negative any-character assertion also rejects a trailing newline, unlike JS `$`.
+export const gitCommitShaPattern = '^(?:[a-fA-F0-9]{40}|[a-fA-F0-9]{64})(?![\\s\\S])';
+export const GitCommitShaSchema = Type.String({ pattern: gitCommitShaPattern });
 export const TimestampSchema = Type.String({ format: 'date-time' });
 export const NullableStringSchema = Type.Union([Type.String(), Type.Null()]);
 
@@ -130,6 +133,7 @@ export const EventSchema = object({
   cwd: Type.String({ maxLength: 2048 }),
   git: object({
     commitSha: Type.Union([Type.String({ pattern: '^[a-fA-F0-9]{40,64}$' }), Type.Null()]),
+    afterCommitSha: Type.Optional(Type.Union([GitCommitShaSchema, Type.Null()])),
     dirty: Type.Boolean(),
     error: Type.Optional(Type.String({ maxLength: 500 })),
   }),
@@ -162,6 +166,7 @@ export const EventSchema = object({
   diffs: Type.Array(
     object({
       phase: Type.Union([Type.Literal('before'), Type.Literal('after')]),
+      baselineCommitSha: Type.Optional(GitCommitShaSchema),
       text: Type.String({ maxLength: 131072 }),
       truncatedBytes: Type.Integer({ minimum: 0 }),
     }),
@@ -448,6 +453,7 @@ export const HandoverEventSchema = object({
   cwdTruncated: Type.Boolean(),
   git: object({
     commitSha: Type.Union([Type.String({ pattern: '^[a-fA-F0-9]{40,64}$' }), Type.Null()]),
+    afterCommitSha: Type.Optional(Type.Union([GitCommitShaSchema, Type.Null()])),
     dirty: Type.Boolean(),
     error: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
   }),
@@ -468,6 +474,7 @@ export const HandoverEventSchema = object({
       phase: Type.Union([Type.Literal('before'), Type.Literal('after')]),
       text: Type.String({ maxLength: 6000 }),
       excerptTruncated: Type.Boolean(),
+      baselineCommitSha: Type.Optional(GitCommitShaSchema),
       capturedTruncatedBytes: Type.Integer({ minimum: 0 }),
     }),
     { maxItems: 2 },

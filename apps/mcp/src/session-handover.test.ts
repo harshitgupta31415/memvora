@@ -191,6 +191,45 @@ describe('MCP portable handover manifest and preview', () => {
     },
   );
 
+  it('preserves exact per-phase baselines and after-HEAD observations without inventing legacy metadata', async () => {
+    const input = fixture();
+    const first = input.events[0]!;
+    first.git.afterCommitSha = 'b'.repeat(64);
+    first.diffs.forEach((diff) => {
+      diff.baselineCommitSha = first.git.commitSha!;
+    });
+    const second = input.events[1]!;
+    second.git.commitSha = 'c'.repeat(40);
+    second.git.afterCommitSha = null;
+    second.diffs[0]!.baselineCommitSha = second.git.commitSha;
+    expect(Check(SessionHandoverSchema, input)).toBe(true);
+
+    const result = buildSessionHandoverPreview(input);
+    expect(result.events[0]!.afterCommitSha).toBe('b'.repeat(64));
+    expect(result.events[0]!.diffBaselines).toEqual([
+      { phase: 'before', baselineCommitSha: 'a'.repeat(64) },
+      { phase: 'after', baselineCommitSha: 'a'.repeat(64) },
+    ]);
+    expect(result.events[1]!.afterCommitSha).toBeNull();
+    expect(result.events[1]!.diffBaselines).toEqual([
+      { phase: 'before', baselineCommitSha: 'c'.repeat(40) },
+      { phase: 'after' },
+    ]);
+    expect(Object.hasOwn(result.events[2]!, 'afterCommitSha')).toBe(false);
+    expect(Object.hasOwn(result.events[2]!, 'diffBaselines')).toBe(false);
+    expect(result.events[2]!.diffPhases).toEqual(['before', 'after']);
+    expect(result.events.map((event) => event.eventId)).toEqual(
+      input.events.map((event) => event.eventId),
+    );
+    const response = await toolResult(async () => result);
+    expect(response.isError).not.toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(response), 'utf8')).toBeLessThanOrEqual(
+      HANDOVER_PREVIEW_BYTE_LIMIT,
+    );
+    expect(JSON.stringify(response)).not.toContain('FULL_AFTER_DIFF_MUST_BE_OMITTED');
+    expect(Object.hasOwn(input.events[2]!.git, 'afterCommitSha')).toBe(false);
+  });
+
   it('rejects a missing note-linked original event or changed source scope', () => {
     const input = fixture();
     input.events.splice(20, 1);

@@ -92,6 +92,78 @@ describe('portable investigation handover derivation', () => {
     expect(JSON.stringify(evidence)).toBe(before);
   });
 
+  it('preserves absent, unavailable and exact-hash Git provenance without manufacturing legacy fields', () => {
+    const { evidence, events } = fixture(4);
+    events[0]!.diffs = [{ phase: 'before', text: 'legacy snapshot', truncatedBytes: 0 }];
+    events[1]!.git.afterCommitSha = null;
+    events[1]!.git.error = 'after HEAD (failed)';
+    events[1]!.capture.complete = false;
+    events[2]!.git.afterCommitSha = 'b'.repeat(40);
+    events[3]!.git.commitSha = 'a'.repeat(64);
+    events[3]!.git.afterCommitSha = 'b'.repeat(64);
+    for (const event of events.slice(1))
+      event.diffs = [
+        {
+          phase: 'before',
+          text: 'retained snapshot',
+          truncatedBytes: 0,
+          baselineCommitSha: event.git.commitSha!,
+        },
+        {
+          phase: 'after',
+          text: 'retained snapshot',
+          truncatedBytes: 0,
+          baselineCommitSha: event.git.commitSha!,
+        },
+      ];
+    const before = JSON.stringify(evidence);
+    const report = deriveSessionHandover(evidence);
+    expect(Check(SessionHandoverSchema, report)).toBe(true);
+    expect(report.events[0]!.git).not.toHaveProperty('afterCommitSha');
+    expect(report.events[0]!.diffs[0]).not.toHaveProperty('baselineCommitSha');
+    expect(report.recap.steps[0]!.diffSummary).toContain('Baseline not recorded');
+    expect(report.events[1]!.git.afterCommitSha).toBeNull();
+    expect(report.recap.steps[1]!.diffSummary).toContain('Comparison unavailable');
+    expect(report.events[2]!.git.afterCommitSha).toBe('b'.repeat(40));
+    expect(report.events[3]!.git.afterCommitSha).toBe('b'.repeat(64));
+    for (const event of report.events.slice(1))
+      expect(event.diffs.map((diff) => diff.baselineCommitSha)).toEqual([
+        event.git.commitSha,
+        event.git.commitSha,
+      ]);
+    expect(JSON.stringify(evidence)).toBe(before);
+  });
+
+  it('compares raw capture differences even when normalized offline diff excerpts become identical', () => {
+    const { evidence, events } = fixture(1);
+    const event = events[0]!;
+    event.git.afterCommitSha = 'b'.repeat(40);
+    event.diffs = [
+      {
+        phase: 'before',
+        text: 'same printable snapshot\u001b[31m\u0007\r\n',
+        truncatedBytes: 0,
+        baselineCommitSha: event.git.commitSha!,
+      },
+      {
+        phase: 'after',
+        text: 'same printable snapshot\n',
+        truncatedBytes: 0,
+        baselineCommitSha: event.git.commitSha!,
+      },
+    ];
+    const before = JSON.stringify(evidence);
+    const report = deriveSessionHandover(evidence);
+    expect(report.events[0]!.diffs.map((diff) => diff.text)).toEqual([
+      'same printable snapshot\n',
+      'same printable snapshot\n',
+    ]);
+    expect(report.recap.steps[0]!.diffSummary).toContain('Captured snapshot texts differ');
+    expect(report.recap.steps[0]!.diffSummary).toContain('Observed HEAD differs after execution');
+    expect(Check(SessionHandoverSchema, report)).toBe(true);
+    expect(JSON.stringify(evidence)).toBe(before);
+  });
+
   it('supports journal-only and empty investigations with no manufactured attempt', () => {
     const { evidence } = fixture(0);
     expect(deriveSessionHandover(evidence).coverage).toMatchObject({
@@ -164,11 +236,13 @@ describe('portable investigation handover derivation', () => {
     evidence.totalNoteCount = 25;
     evidence.events = events;
     for (const event of events) {
+      event.git.afterCommitSha = 'b'.repeat(40);
       event.output = [{ ordinal: 0, stream: 'stdout', text: '界'.repeat(6001) }];
       event.diffs = ['before', 'after'].map((phase) => ({
         phase: phase as 'before' | 'after',
         text: '界'.repeat(6001),
         truncatedBytes: 0,
+        baselineCommitSha: event.git.commitSha!,
       }));
     }
     const report = deriveSessionHandover(evidence);
@@ -176,6 +250,12 @@ describe('portable investigation handover derivation', () => {
     expect(Buffer.byteLength(JSON.stringify(report))).toBeLessThanOrEqual(2097152);
     expect(report.events).toHaveLength(140);
     expect(report.notes).toHaveLength(10);
+    expect(report.events.every((event) => event.git.afterCommitSha === 'b'.repeat(40))).toBe(true);
+    expect(
+      report.events.every((event) =>
+        event.diffs.every((diff) => diff.baselineCommitSha === event.git.commitSha),
+      ),
+    ).toBe(true);
     expect(report.coverage.omittedNotes).toBe(15);
     expect(
       report.notes

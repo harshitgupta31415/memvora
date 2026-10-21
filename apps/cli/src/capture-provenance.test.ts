@@ -70,8 +70,8 @@ function realGit(cwd: string) {
       .toString('utf8')
       .trim();
 }
-function commitFixture(run: (...args: string[]) => string, cwd: string) {
-  run(
+function commitArguments(cwd: string): string[] {
+  return [
     '-c',
     'user.name=harshitgupta31415',
     '-c',
@@ -83,17 +83,23 @@ function commitFixture(run: (...args: string[]) => string, cwd: string) {
     'commit',
     '-qm',
     'Synthetic provenance fixture',
-  );
+  ];
+}
+function commitFixture(run: (...args: string[]) => string, cwd: string) {
+  run(...commitArguments(cwd));
 }
 function injected(
-  fail?: 'HEAD' | 'status' | 'before' | 'after',
+  fail?: 'HEAD' | 'after HEAD' | 'status' | 'before' | 'after',
   kind = 'failed' as 'failed' | 'timeout' | 'unavailable' | 'not_repository',
 ) {
   let diffs = 0;
+  let heads = 0;
   return vi.fn<typeof gitText>(async (_cwd, args) => {
     const phase =
       args[0] === 'rev-parse'
-        ? 'HEAD'
+        ? ++heads === 1
+          ? 'HEAD'
+          : 'after HEAD'
         : args[0] === 'status'
           ? 'status'
           : ++diffs === 1
@@ -107,7 +113,11 @@ function injected(
         failure: kind,
       };
     return success(
-      phase === 'HEAD' ? 'a'.repeat(40) : phase === 'status' ? '' : `${phase} synthetic diff`,
+      phase === 'HEAD' || phase === 'after HEAD'
+        ? 'a'.repeat(40)
+        : phase === 'status'
+          ? ''
+          : `${phase} synthetic diff`,
     );
   });
 }
@@ -117,17 +127,109 @@ describe('capture Git provenance', () => {
     const f = fixture();
     const git = injected();
     expect((await captureCommand(f.options, { git })).exitCode).toBe(7);
-    expect(f.event().git).toEqual({ commitSha: 'a'.repeat(40), dirty: false });
+    expect(f.event().git).toEqual({
+      commitSha: 'a'.repeat(40),
+      afterCommitSha: 'a'.repeat(40),
+      dirty: false,
+    });
     expect(f.event().capture.complete).toBe(true);
     expect(f.event().diffs.map((diff) => diff.phase)).toEqual(['before', 'after']);
     for (const call of git.mock.calls.filter((call) => call[1][0] === 'diff')) {
       expect(call[1]).toContain('--no-ext-diff');
       expect(call[1]).toContain('--no-textconv');
+      expect(call[1][1]).toBe('a'.repeat(40));
+      expect(call[1]).not.toContain('HEAD');
       expect(call[2]).toBe(32 * 1024);
     }
+    expect(f.event().diffs.every((diff) => diff.baselineCommitSha === 'a'.repeat(40))).toBe(true);
   });
 
-  it.each(['status', 'before', 'after'] as const)(
+  it.each([40, 64])(
+    'pins both diffs to the validated %i-character start commit even if HEAD moves before the first diff',
+    async (length) => {
+      const f = fixture();
+      const startingCommit = 'a'.repeat(length);
+      const laterCommit = 'b'.repeat(length);
+      let observedHead = startingCommit;
+      const git = vi.fn<typeof gitText>(async (_cwd, args) => {
+        if (args[0] === 'rev-parse') return success(observedHead);
+        if (args[0] === 'status') {
+          observedHead = laterCommit;
+          return success();
+        }
+        return success(`captured snapshot relative to ${args[1]}`);
+      });
+      const begin = vi.spyOn(f.outbox, 'begin');
+      expect((await captureCommand(f.options, { git })).exitCode).toBe(7);
+      expect(f.event().git).toEqual({
+        commitSha: startingCommit,
+        afterCommitSha: laterCommit,
+        dirty: false,
+      });
+      expect(f.event().diffs).toHaveLength(2);
+      expect(f.event().diffs.every((diff) => diff.baselineCommitSha === startingCommit)).toBe(true);
+      expect(
+        git.mock.calls.filter((call) => call[1][0] === 'diff').map((call) => call[1][1]),
+      ).toEqual([startingCommit, startingCommit]);
+      expect(begin.mock.calls[0]?.[2]).not.toHaveProperty('git.afterCommitSha');
+      expect(f.event().capture.complete).toBe(true);
+    },
+  );
+
+  it('never replaces an unresolved start baseline with a later valid HEAD', async () => {
+    const f = fixture();
+    const git = injected('HEAD');
+    expect((await captureCommand(f.options, { git })).exitCode).toBe(7);
+    expect(f.event().git).toEqual({
+      commitSha: null,
+      afterCommitSha: 'a'.repeat(40),
+      dirty: false,
+      error: 'Git evidence unavailable: HEAD (failed).',
+    });
+    expect(f.event().diffs).toEqual([]);
+    expect(f.event().capture.complete).toBe(false);
+    expect(git.mock.calls.some((call) => call[1][0] === 'diff')).toBe(false);
+  });
+
+  it.each(['not-a-commit', 'b'.repeat(41), 'b'.repeat(63)])(
+    'retains pinned snapshots when the after HEAD output is malformed (%s)',
+    async (afterHead) => {
+      const f = fixture();
+      let heads = 0;
+      const git = vi.fn<typeof gitText>(async (_cwd, args) =>
+        success(args[0] === 'rev-parse' ? (++heads === 1 ? 'a'.repeat(40) : afterHead) : ''),
+      );
+      expect((await captureCommand(f.options, { git })).exitCode).toBe(7);
+      expect(f.event().git).toEqual({
+        commitSha: 'a'.repeat(40),
+        afterCommitSha: null,
+        dirty: false,
+        error: 'Git evidence unavailable: after HEAD (failed).',
+      });
+      expect(f.event().diffs.map((diff) => diff.baselineCommitSha)).toEqual([
+        'a'.repeat(40),
+        'a'.repeat(40),
+      ]);
+      expect(f.event().capture.complete).toBe(false);
+    },
+  );
+
+  it('rejects a truncated after HEAD even when its retained text looks like a full SHA', async () => {
+    const f = fixture();
+    let heads = 0;
+    const git = vi.fn<typeof gitText>(async (_cwd, args) =>
+      args[0] === 'rev-parse' && ++heads === 2
+        ? { ok: true, text: 'b'.repeat(40), truncatedBytes: 1 }
+        : success(args[0] === 'rev-parse' ? 'a'.repeat(40) : ''),
+    );
+    await captureCommand(f.options, { git });
+    expect(f.event().git.afterCommitSha).toBeNull();
+    expect(f.event().git.error).toContain('after HEAD (failed)');
+    expect(f.event().diffs).toHaveLength(2);
+    expect(f.event().capture.complete).toBe(false);
+  });
+
+  it.each(['status', 'before', 'after', 'after HEAD'] as const)(
     'records a %s failure without altering execution or persisting partial diagnostics',
     async (phase) => {
       const f = fixture();
@@ -136,14 +238,18 @@ describe('capture Git provenance', () => {
       const event = f.event();
       expect(event.git.commitSha).toBe('a'.repeat(40));
       expect(event.git.error).toContain(
-        phase === 'status' ? 'status (failed)' : `${phase} diff (failed)`,
+        phase === 'status' || phase === 'after HEAD'
+          ? `${phase} (failed)`
+          : `${phase} diff (failed)`,
       );
       expect(event.capture.complete).toBe(false);
       expect(event.output.map((chunk) => chunk.text).join('')).toContain('observed command output');
-      if (phase !== 'status')
+      if (phase === 'before' || phase === 'after')
         expect(event.diffs.map((diff) => diff.phase)).toEqual([
           phase === 'before' ? 'after' : 'before',
         ]);
+      else expect(event.diffs.map((diff) => diff.phase)).toEqual(['before', 'after']);
+      expect(event.git.afterCommitSha).toBe(phase === 'after HEAD' ? null : 'a'.repeat(40));
       expect(JSON.stringify(event)).not.toContain('PrivateFailedGitPartialFixture');
       expect(event.outcome).toMatchObject({ kind: 'completed', exitCode: 7 });
     },
@@ -162,12 +268,18 @@ describe('capture Git provenance', () => {
       expect((await captureCommand(f.options, { git })).exitCode).toBe(7);
       expect(f.event().git).toEqual({
         commitSha: null,
+        afterCommitSha: null,
         dirty: false,
-        error: `Git evidence unavailable: HEAD (${failure}); status (${failure}); before diff (${failure}); after diff (${failure}).`,
+        error: `Git evidence unavailable: HEAD (${failure}); status (${failure}); after HEAD (${failure}).`,
       });
       expect(f.event().diffs).toEqual([]);
       expect(f.event().capture.complete).toBe(false);
       expect(JSON.stringify(f.event())).not.toContain('PrivateProbeDiagnosticFixture');
+      expect(git.mock.calls.map((call) => call[1][0])).toEqual([
+        'rev-parse',
+        'status',
+        'rev-parse',
+      ]);
     },
   );
 
@@ -179,9 +291,11 @@ describe('capture Git provenance', () => {
     });
     expect((await captureCommand(f.options, { git })).exitCode).toBe(7);
     expect(f.event().git.commitSha).toBeNull();
+    expect(f.event().git.afterCommitSha).toBeNull();
     expect(f.event().git.error).toContain('HEAD (failed); status (failed)');
     expect(f.event().capture.complete).toBe(false);
     expect(JSON.stringify(f.event())).not.toContain('PrivateUnexpectedGitFailure');
+    expect(git.mock.calls.some((call) => call[1][0] === 'diff')).toBe(false);
   });
 
   it('captures real clean/dirty Git state while rejecting environment redirection and excluding sensitive/untracked contents', async () => {
@@ -222,7 +336,7 @@ describe('capture Git provenance', () => {
     vi.stubEnv('GIT_INDEX_FILE', join(f.cwd, 'nonexistent-foreign-index'));
     vi.stubEnv('GIT_CEILING_DIRECTORIES', temporaryRoot);
     await captureCommand(f.options);
-    expect(f.event().git).toEqual({ commitSha: sha, dirty: false });
+    expect(f.event().git).toEqual({ commitSha: sha, afterCommitSha: sha, dirty: false });
     expect(f.event().diffs.every((diff) => diff.text === '')).toBe(true);
     expect(f.event().capture.complete).toBe(true);
     writeFileSync(join(f.cwd, 'source.txt'), 'visible tracked modification\n');
@@ -233,7 +347,7 @@ describe('capture Git provenance', () => {
     writeFileSync(join(f.cwd, 'git.exe'), 'PrivateRepositoryGitShadowFixture');
     writeFileSync(join(f.cwd, 'git.com'), 'PrivateRepositoryGitShadowFixture');
     await captureCommand(f.options);
-    expect(f.event().git).toEqual({ commitSha: sha, dirty: true });
+    expect(f.event().git).toEqual({ commitSha: sha, afterCommitSha: sha, dirty: true });
     expect(f.event().capture.complete).toBe(true);
     const diffs = f
       .event()
@@ -247,6 +361,103 @@ describe('capture Git provenance', () => {
     ])
       expect(diffs).not.toContain(secret);
   }, 20_000);
+
+  it('keeps an explicit common baseline across pre-existing edits, staging, commit, reset and checkout', async () => {
+    const f = fixture();
+    const run = realGit(f.cwd);
+    run('init', '-q');
+    writeFileSync(join(f.cwd, 'source.txt'), 'original source\n');
+    writeFileSync(join(f.cwd, 'second.txt'), 'original second source\n');
+    run('add', '--', 'source.txt', 'second.txt');
+    commitFixture(run, f.cwd);
+    const startingCommit = run('rev-parse', 'HEAD');
+    writeFileSync(join(f.cwd, 'source.txt'), 'pre-existing tracked edit\n');
+
+    await captureCommand(f.options);
+    expect(f.event().git).toEqual({
+      commitSha: startingCommit,
+      afterCommitSha: startingCommit,
+      dirty: true,
+    });
+    expect(f.event().diffs[0]?.text).toContain('pre-existing tracked edit');
+    expect(f.event().diffs[1]?.text).toBe(f.event().diffs[0]?.text);
+
+    await captureCommand({
+      ...f.options,
+      command: [
+        process.execPath,
+        '-e',
+        'require("node:fs").writeFileSync("second.txt", "new tracked interval edit\\n")',
+      ],
+    });
+    expect(f.event().diffs[0]?.text).not.toContain('new tracked interval edit');
+    expect(f.event().diffs[1]?.text).toContain('new tracked interval edit');
+    expect(f.event().diffs[1]?.text).toContain('pre-existing tracked edit');
+
+    expect(
+      (
+        await captureCommand({
+          ...f.options,
+          command: ['git', 'add', '--', 'source.txt', 'second.txt'],
+        })
+      ).exitCode,
+    ).toBe(0);
+    expect(run('diff', '--cached', '--', 'source.txt')).toContain('pre-existing tracked edit');
+    expect(f.event().diffs[0]?.text).toBe(f.event().diffs[1]?.text);
+
+    expect(
+      (await captureCommand({ ...f.options, command: ['git', ...commitArguments(f.cwd)] }))
+        .exitCode,
+    ).toBe(0);
+    const committed = f.event();
+    const laterCommit = run('rev-parse', 'HEAD');
+    expect(laterCommit).not.toBe(startingCommit);
+    expect(committed.git).toEqual({
+      commitSha: startingCommit,
+      afterCommitSha: laterCommit,
+      dirty: true,
+    });
+    // Moving HEAD does not erase the after snapshot's interval evidence.
+    expect(run('diff', 'HEAD', '--', 'source.txt', 'second.txt')).toBe('');
+    expect(committed.diffs[0]?.text).toBe(committed.diffs[1]?.text);
+    expect(committed.diffs[1]?.text).toContain('new tracked interval edit');
+    expect(committed.diffs.every((diff) => diff.baselineCommitSha === startingCommit)).toBe(true);
+
+    expect(
+      (
+        await captureCommand({
+          ...f.options,
+          command: ['git', 'reset', '--hard', startingCommit],
+        })
+      ).exitCode,
+    ).toBe(0);
+    expect(f.event().git).toEqual({
+      commitSha: laterCommit,
+      afterCommitSha: startingCommit,
+      dirty: false,
+    });
+    expect(f.event().diffs[0]?.text).toBe('');
+    expect(f.event().diffs[1]?.text).toContain('-new tracked interval edit');
+    expect(f.event().diffs.every((diff) => diff.baselineCommitSha === laterCommit)).toBe(true);
+
+    expect(
+      (
+        await captureCommand({
+          ...f.options,
+          command: ['git', 'checkout', '--detach', laterCommit],
+        })
+      ).exitCode,
+    ).toBe(0);
+    expect(f.event().git).toEqual({
+      commitSha: startingCommit,
+      afterCommitSha: laterCommit,
+      dirty: false,
+    });
+    expect(f.event().diffs[0]?.text).toBe('');
+    expect(f.event().diffs[1]?.text).toContain('+new tracked interval edit');
+    expect(f.event().diffs.every((diff) => diff.baselineCommitSha === startingCommit)).toBe(true);
+    expect(f.event().capture.complete).toBe(true);
+  }, 45_000);
 
   it('times out a real idle clean-filter tree without leaving the filter or its pipe-holding descendant running', async () => {
     const f = fixture();

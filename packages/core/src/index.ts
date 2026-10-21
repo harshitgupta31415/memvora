@@ -89,6 +89,7 @@ export function getSystemStatus(options: { local?: boolean } = {}): SystemStatus
 }
 export * from './source-excerpts.js';
 export * from './session-recap.js';
+export * from './git-evidence.js';
 export * from './session-notes.js';
 export * from './session-handover.js';
 export * from './session-directory.js';

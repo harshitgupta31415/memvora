@@ -1,5 +1,11 @@
 import Type from 'typebox';
-import { CitationSchema, IdSchema, SessionNoteCitationSchema, TimestampSchema } from './local.js';
+import {
+  CitationSchema,
+  GitCommitShaSchema,
+  IdSchema,
+  SessionNoteCitationSchema,
+  TimestampSchema,
+} from './local.js';
 
 const object = <T extends Record<string, Type.TSchema>>(properties: T) =>
   Type.Object(properties, { additionalProperties: false });
@@ -8,7 +14,10 @@ export const SessionSynthesisConfigurationSchema = object({
   provider: Type.String({ minLength: 1, maxLength: 200 }),
   model: Type.String({ minLength: 1, maxLength: 200 }),
   fingerprint: hash,
-  promptVersion: Type.Literal('session-analysis-v1'),
+  promptVersion: Type.Union([
+    Type.Literal('session-analysis-v1'),
+    Type.Literal('session-analysis-v2'),
+  ]),
 });
 export type SessionSynthesisConfiguration = Type.Static<typeof SessionSynthesisConfigurationSchema>;
 export const SessionSynthesisCoverageSchema = object({
@@ -42,6 +51,8 @@ export const SessionSynthesisInputSchema = object({
         exitCode: Type.Union([Type.Integer(), Type.Null()]),
       }),
       commitSha: Type.Union([Type.String({ maxLength: 64 }), Type.Null()]),
+      afterCommitSha: Type.Optional(Type.Union([GitCommitShaSchema, Type.Null()])),
+      diffBaselineCommitSha: Type.Optional(Type.Union([GitCommitShaSchema, Type.Null()])),
       output: Type.String({ maxLength: 1200 }),
       diff: Type.String({ maxLength: 1200 }),
       captureIncomplete: Type.Boolean(),

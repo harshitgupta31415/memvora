@@ -100,10 +100,12 @@ Use direct Node for MCP so stdout remains protocol-only. Configure the host with
 }
 ```
 
-Host configuration keys can differ. Restart/reconnect the chosen host, call `memvora_status`, then retrieve an actual captured event through `search_memory` and `get_memory`. Version 0.7.0 retains the same fourteen read-only tools and API authorization boundaries as the source adapter, including `get_session_synthesis` and `get_session_synthesis_history`. It adds no journal enqueue/retry or command-execution tool. Synthesis creation remains an explicit website/CLI action; installation and reads do not enable a provider. See [the MCP guide](../apps/mcp/README.md), [SESSION_SYNTHESIS.md](SESSION_SYNTHESIS.md) and [OWNER_SETUP.md](OWNER_SETUP.md) for the real-host checks.
+Host configuration keys can differ. Restart/reconnect the chosen host, call `memvora_status`, then retrieve an actual captured event through `search_memory` and `get_memory`. Version 0.8.0 retains the same fourteen read-only tools and API authorization boundaries as the source adapter, including `get_session_synthesis` and `get_session_synthesis_history`. It adds no journal enqueue/retry or command-execution tool. Synthesis creation remains an explicit website/CLI action; installation and reads do not enable a provider. See [the MCP guide](../apps/mcp/README.md), [SESSION_SYNTHESIS.md](SESSION_SYNTHESIS.md) and [OWNER_SETUP.md](OWNER_SETUP.md) for the real-host checks.
 
 ## Upgrade and remove
 
 Install a newer reviewed tarball into the same installation prefix using the same offline/scripts-disabled flags. Package removal uses `npm.cmd uninstall --prefix <installation-folder> --workspaces=false --ignore-scripts --no-audit --no-fund @memvora/clients`. This removes client files, not server data or repository-local bindings/outboxes. Keep those data folders separate and use [BACKUPS.md](BACKUPS.md) for database snapshots.
 
 The package's `private: true` setting blocks accidental npm publication. Anyone who receives the tarball can retain its code independently, so keep its distribution private. It contains neither an API server nor device pairing, an OS credential vault or remote MCP OAuth.
+
+Version 0.8.0 adds explicit fixed Git baselines and separate after-command HEAD observations across capture, retrieval and handover. Historical events retain unknown baseline provenance. See [GIT_SNAPSHOTS.md](GIT_SNAPSHOTS.md).
