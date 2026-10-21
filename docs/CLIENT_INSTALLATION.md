@@ -55,7 +55,7 @@ $memvora = Join-Path $clientPrefix 'node_modules\.bin\memvora.cmd'
 & $memvora status
 ```
 
-CLI `--home <absolute-directory>` overrides `MEMVORA_DATA_DIR`. A privately supplied `MEMVORA_LOCAL_TOKEN` takes precedence and does not require reading a data directory. Never paste a token into a committed command file or chat. The portable clients require one of these explicit credential sources; they do not search ancestors or their installation folder for a server store and do not automatically load `.env`. Source-checkout entry points retain their existing development fallback.
+CLI `--home <absolute-directory>` overrides `MEMVORA_DATA_DIR`. A privately supplied `MEMVORA_LOCAL_TOKEN` takes precedence and does not require reading a data directory. Never paste a token into a committed command file or chat. API-backed portable operations require one of these explicit credential sources; they do not search ancestors or their installation folder for a server store and do not automatically load `.env`. Source-checkout entry points retain their existing development fallback. Offline help/version, capture-outbox listing and journal queue/list operations do not require an API credential.
 
 Open the target code repository in PowerShell. Retain the absolute `$memvora` path and API/data-directory environment above, then use the normal capture flow:
 
@@ -66,6 +66,20 @@ Open the target code repository in PowerShell. Retain the absolute `$memvora` pa
 ```
 
 Each capture project's `.memvora` retains its binding and SQLite outbox independently of the installed client package. Use [OUTBOX_RECOVERY.md](OUTBOX_RECOVERY.md) for offline inspection and selected retries. A successful package installation does not prove a command was captured or a fix was verified; follow the returned original event citation.
+
+### Keep an authored note for manual retry
+
+Version 0.7.0 adds an opt-in journal queue, separate from captured command uploads. From an already bound capture folder, save a note for its current investigation, inspect metadata offline, then deliberately retry its original UUID:
+
+```powershell
+& $memvora session note --text 'Replace this example with your own report.' --queue
+& $memvora journal list --directory (Get-Location).Path --state pending --limit 20
+& $memvora journal retry --note '<UUID copied from item.noteId>'
+```
+
+Queue/list need no running API or credential. Retry of a pending note requires the original matching API/repository and an authorized server identity; its first verified user/workspace/generation is pinned before submission. An exact acknowledgement is required to mark the row synced. A retained synced receipt returns without HTTP or credential lookup and does not prove the server still retains the note. The original current-session restriction applies when queueing; retry can target an older saved session after newer work begins.
+
+The queue stores private plaintext outside the package, admits at most 1,000 retained notes/32 KiB per prepared envelope, and has no automatic flush, edit or drop command. Ordinary `session note` remains a direct write; command `run`/`sync` does not send queued notes. Browser note drafts remain in page memory. Keep the queue separately from [server-only backups](BACKUPS.md); see [JOURNAL_RECOVERY.md](JOURNAL_RECOVERY.md) for states, response-loss recovery and redaction limits. Installing/upgrading/removing the client does not move or delete this evidence.
 
 ## Connect the installed MCP adapter
 
@@ -86,7 +100,7 @@ Use direct Node for MCP so stdout remains protocol-only. Configure the host with
 }
 ```
 
-Host configuration keys can differ. Restart/reconnect the chosen host, call `memvora_status`, then retrieve an actual captured event through `search_memory` and `get_memory`. Version 0.6.0 exposes the same fourteen read-only tools and API authorization boundaries as the source adapter, including `get_session_synthesis` and `get_session_synthesis_history`. Synthesis creation remains an explicit website/CLI action; installation and reads do not enable a provider. See [the MCP guide](../apps/mcp/README.md), [SESSION_SYNTHESIS.md](SESSION_SYNTHESIS.md) and [OWNER_SETUP.md](OWNER_SETUP.md) for the real-host checks.
+Host configuration keys can differ. Restart/reconnect the chosen host, call `memvora_status`, then retrieve an actual captured event through `search_memory` and `get_memory`. Version 0.7.0 retains the same fourteen read-only tools and API authorization boundaries as the source adapter, including `get_session_synthesis` and `get_session_synthesis_history`. It adds no journal enqueue/retry or command-execution tool. Synthesis creation remains an explicit website/CLI action; installation and reads do not enable a provider. See [the MCP guide](../apps/mcp/README.md), [SESSION_SYNTHESIS.md](SESSION_SYNTHESIS.md) and [OWNER_SETUP.md](OWNER_SETUP.md) for the real-host checks.
 
 ## Upgrade and remove
 

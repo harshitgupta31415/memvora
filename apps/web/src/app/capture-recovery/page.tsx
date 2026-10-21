@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { trustedLocalHost } from '@/lib/api';
 import { localCaptureRecoveryDetails } from '@/lib/local-setup';
 import { CaptureRecoveryBuilder } from '@/components/capture-recovery-builder';
+import { JournalRecoveryBuilder } from '@/components/journal-recovery-builder';
 import { Icon } from '@/components/icon';
 import { ErrorState, PageHeading, SectionHeading } from '@/components/ui';
 import styles from './recovery.module.css';
@@ -19,7 +20,7 @@ export default async function CaptureRecovery({
     <PageHeading
       eyebrow="LOCAL CAPTURE RECOVERY"
       title="Inspect first. Sync a deliberate selection."
-      description="Build manual PowerShell commands for a repository’s local capture outbox. Generating instructions does not inspect files or upload evidence."
+      description="Build manual PowerShell commands for a repository’s capture outbox or queued journal notes. Generating instructions does not inspect files or upload evidence."
     />
   );
   if (Object.keys(parameters).length > 0)
@@ -28,7 +29,7 @@ export default async function CaptureRecovery({
         {heading}
         <ErrorState
           message="This capture-recovery link is invalid."
-          detail="This guide takes no query parameters. No capture commands were generated."
+          detail="This guide takes no query parameters. No recovery commands were generated."
         />
         <Link href="/capture-recovery" className="button button-small">
           Open the recovery guide
@@ -67,6 +68,14 @@ export default async function CaptureRecovery({
           read-only, without initialization, migration, crash recovery or acknowledgement changes.
           SQLite may manage locking sidecars. This website does not open the outbox.
         </p>
+        <div className={styles.links}>
+          <a href="#recovery-builder-title" className="inline-link">
+            Captured command recovery <Icon name="arrow" size={13} />
+          </a>
+          <a href="#journal-recovery" className="inline-link">
+            Queued journal recovery <Icon name="arrow" size={13} />
+          </a>
+        </div>
         {details.syncConfigurationError && (
           <p className={styles.warning}>
             {details.syncConfigurationError} Offline list commands remain available.
@@ -170,6 +179,51 @@ export default async function CaptureRecovery({
             </Link>
           </div>
         </section>
+        <section id="journal-recovery" className={`panel ${styles.section}`}>
+          <SectionHeading title="Recover a user-authored journal note" />
+          <p>
+            In the original bound capture folder,{' '}
+            <code>session note [session-id] --text … --queue</code> saves a prepared note locally
+            without contacting the API. A new queued note must target that folder’s current bound
+            investigation; an explicit session ID must match it. Queued notes are user-authored
+            reports, not independently verified observations.
+          </p>
+          <p>
+            Queued does not mean server accepted. There is no automatic flush. List the journal’s
+            metadata offline, then choose one exact UUID for an explicit retry. You can select a
+            retained older note even after starting a different investigation. The queue admits up
+            to 1,000 retained notes, with a 32 KiB prepared-payload limit per note.
+          </p>
+          <dl className={styles.states}>
+            <div>
+              <dt>Pending</dt>
+              <dd>
+                No exact server acknowledgement has been recorded locally. An uncertain response can
+                leave a server-accepted note pending; retry the original UUID and content.
+              </dd>
+            </div>
+            <div>
+              <dt>Synced</dt>
+              <dd>
+                The server acknowledgement matched the queued note. This is a historical receipt,
+                not a guarantee that the note remains accessible or retained on the server.
+              </dd>
+            </div>
+          </dl>
+          <p>
+            Retry keeps the saved API and repository identity and pins the authenticated user and
+            workspace on its first attempt. A matching acknowledgement is required before the local
+            row becomes synced. A denied or deleted destination leaves the local note retained; do
+            not change its UUID, rewrite its scope or force an acknowledgement.
+          </p>
+          <p className={styles.warning}>
+            The local journal queue contains plaintext note bodies and citations. Known-pattern
+            redaction is not complete privacy protection. Keep the folder private and outside Git;
+            server backups exclude this local queue. A separate local copy also remains after server
+            deletion. The builder below never collects note bodies or opens the queue.
+          </p>
+        </section>
+        <JournalRecoveryBuilder listPrefix={details.listPrefix} retryPrefix={details.retryPrefix} />
       </div>
     </>
   );

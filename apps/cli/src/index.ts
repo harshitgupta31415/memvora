@@ -19,6 +19,8 @@ import { captureCommand, recoverIncomplete } from './capture.js';
 import { initializeRepository } from './initialization.js';
 import { readExistingOutboxPage } from './outbox-inspection.js';
 import { resolveSyncFilter, synchronizeOutbox } from './outbox-sync.js';
+import { readJournalOutboxPage } from './journal-outbox.js';
+import { queueBoundJournalNote, retryJournalNote } from './journal-sync.js';
 import { formatSessionRecap, readSessionRecap } from './session-recap.js';
 import {
   prepareSynthesisRequest,
@@ -71,15 +73,18 @@ function connection(binding?: Binding): {
   const options = program.opts<{ apiUrl?: string; home?: string }>();
   const credential = readCredential(options.home);
   return {
-    origin:
-      options.apiUrl ??
-      process.env['MEMVORA_API_URL'] ??
-      binding?.apiUrl ??
-      'http://127.0.0.1:4000',
+    origin: connectionOrigin(binding),
     token: credential.token,
     credentialSource: credential.source,
     credentialPath: credential.source === 'file' ? credential.credentialPath : null,
   };
+}
+
+function connectionOrigin(binding?: Binding): string {
+  const options = program.opts<{ apiUrl?: string }>();
+  return (
+    options.apiUrl ?? process.env['MEMVORA_API_URL'] ?? binding?.apiUrl ?? 'http://127.0.0.1:4000'
+  );
 }
 
 function bound(): { root: string; binding: Binding } {
@@ -111,6 +116,59 @@ function outboxInteger(value: string | undefined, label: string): number | undef
     throw new Error(`Use a positive safe integer for ${label}.`);
   return Number(value);
 }
+
+const journal = program
+  .command('journal')
+  .description('Inspect and explicitly retry locally queued authored notes.');
+
+journal
+  .command('list')
+  .description('Read existing journal queue metadata offline, without displaying note text.')
+  .option('--directory <path>', 'Capture project directory; bypass binding discovery')
+  .option('--state <state>', 'pending, synced or all', 'pending')
+  .option('--limit <count>', 'Rows per page, from 1 to 50', '20')
+  .option('--after <row-id>', 'nextAfter from the previous live oldest-first page')
+  .action((options: { directory?: string; state: string; limit: string; after?: string }) => {
+    const limit = outboxInteger(options.limit, '--limit');
+    const after = outboxInteger(options.after, '--after');
+    if (limit !== undefined && limit > 50) throw new Error('Use --limit from 1 to 50.');
+    if (!['pending', 'synced', 'all'].includes(options.state))
+      throw new Error('Use --state pending, synced or all.');
+    const root = options.directory ?? findBindingDirectory();
+    if (!root)
+      throw new Error(
+        'Use --directory <capture-project-directory> to inspect the local journal queue.',
+      );
+    console.log(
+      JSON.stringify(
+        readJournalOutboxPage({
+          root,
+          state: options.state as 'pending' | 'synced' | 'all',
+          ...(limit === undefined ? {} : { limit }),
+          ...(after === undefined ? {} : { after }),
+        }),
+        null,
+        2,
+      ),
+    );
+  });
+
+journal
+  .command('retry')
+  .description('Explicitly submit one saved note with its original UUID, text and citations.')
+  .requiredOption('--note <uuid>', 'The exact locally queued note UUID')
+  .action(async (options: { note: string }) => {
+    if (!Check(IdSchema, options.note)) throw new Error('Choose one valid note UUID with --note.');
+    const { root, binding } = bound();
+    const result = await retryJournalNote(
+      { root, binding, origin: connectionOrigin(binding), noteId: options.note },
+      () => {
+        const globals = program.opts<{ home?: string }>();
+        return readCredential(globals.home).token;
+      },
+    );
+    console.log(JSON.stringify(result, null, 2));
+  });
 
 program
   .command('outbox')
@@ -421,10 +479,25 @@ session
     [],
   )
   .option('--note-id <uuid>', 'Reuse this note UUID when retrying the same submission')
+  .option('--queue', 'Save this note locally for an explicit journal retry; no network request')
   .action(async (id: string | undefined, options: NoteOptions) => {
     if (id !== undefined && !Check(IdSchema, id))
       throw new Error('An authorized session UUID is required.');
     const input = prepareSessionNote(options);
+    if (options.queue) {
+      const { root, binding } = bound();
+      const sessionId = id ?? binding.sessionId;
+      if (!Check(IdSchema, sessionId))
+        throw new Error('A current bound investigation is required to queue a note.');
+      console.log(
+        JSON.stringify(
+          queueBoundJournalNote(root, binding, sessionId, connectionOrigin(binding), input),
+          null,
+          2,
+        ),
+      );
+      return;
+    }
     try {
       const binding = id ? undefined : bound().binding;
       const sessionId = id ?? binding?.sessionId;

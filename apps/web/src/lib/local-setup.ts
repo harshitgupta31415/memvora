@@ -161,6 +161,7 @@ export async function localCaptureRecoveryDetails() {
     cliBuilt: await isFile(paths.cli),
     listPrefix: `& node ${quotePowerShellArgument(paths.cli)}`,
     syncPrefix: localCliCommand(['sync']),
+    retryPrefix: localCliCommand(['journal', 'retry']),
     syncConfigurationError: configuration.ok ? null : configuration.message,
     externalCredential: configuration.ok && configuration.externalCredential,
   };

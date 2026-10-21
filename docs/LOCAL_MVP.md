@@ -15,7 +15,7 @@ Read-only MCP adapter ---+                    |
 
 The web server, CLI and MCP share runtime response contracts and the same local API. They do not open the server evidence database directly. The CLI has its own SQLite outbox for offline durability. The API ordinarily runs the local background processor, one job at a time; a separate worker executable is also present. There is no need to start it for the default development flow.
 
-CLI and MCP version 0.6.0 can also be installed together from a private local tarball without this source checkout. Follow [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md) for Node requirements, isolated installation, explicit server credentials, upgrades and removal. The API and website remain separate processes; source-development commands below retain their existing fallback paths.
+CLI and MCP version 0.7.0 can also be installed together from a private local tarball without this source checkout. Follow [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md) for Node requirements, isolated installation, explicit server credentials, upgrades and removal. The API and website remain separate processes; source-development commands below retain their existing fallback paths.
 
 Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. Lexical recall also searches the latest imported redacted code snapshot and returns immutable file citations. The optional provider path is separate and remains disabled unless explicitly configured.
 
@@ -53,7 +53,7 @@ All clients call protected `POST /v1/sessions/search` with a validated JSON body
 
 Open an investigation to record a note, decision or reported resolution, optionally linking up to ten captured command IDs from that investigation. Entries keep the local user's author/time, remain separate from raw command evidence and are not independently verified. Report text is normalized and redacted before persistence/search. Existing entries cannot be edited; add a correction as another note. Saving a resolution report does not close the investigation or prove a fix.
 
-The composer preserves its draft and submission UUID after an uncertain response; retry unchanged text to avoid a duplicate entry. Editing the draft starts a new identity. Journal pages have their own earlier/latest navigation and preserve the command timeline's cursor. Original note pages and Ask citations retain attached evidence links. Ask can recover exact note terms or recent journal context, including an investigation with no captured command yet.
+The composer preserves its draft and submission UUID after an uncertain response while the page remains open; retry unchanged text to avoid a duplicate entry. Editing the draft starts a new identity. Browser drafts stay in page memory and do not survive reloads. Journal pages have their own earlier/latest navigation and preserve the command timeline's cursor. Original note pages and Ask citations retain attached evidence links. Ask can recover exact note terms or recent journal context, including an investigation with no captured command yet.
 
 ```powershell
 node apps/cli/dist/index.js session note <session-id> --kind decision --text "Explain why you chose this approach" --event <event-id>
@@ -61,6 +61,12 @@ node apps/cli/dist/index.js session notes <session-id> --limit 10
 ```
 
 Repeat `--event` to attach more commands. After an uncertain CLI write, use the printed `--note-id` with the same text/kind/links. CLI does not automatically retry note writes or add them to the capture outbox. MCP tools `search_session_notes`, `get_session_note` and `get_session_notes` read these reports; they never create one. Parent session/repository/workspace deletion removes notes and their search entries. Browser GitHub connection state does not confer another user's authority to write notes.
+
+For durable offline retry, explicitly opt in with `session note [id] --text ... --queue` from the capture folder's existing binding. A queued note must target the current bound `sessionId`; default direct submission remains unchanged. The separate `.memvora/journal-outbox.sqlite` retains the canonical known-pattern-redacted payload, UUID and API/repository/session identity without a credential lookup or server request. Queueing does not verify event membership or mean server acceptance. Admission is 1,000 total retained notes, including synced rows, and 32 KiB per prepared scope/input envelope.
+
+`journal list --directory <absolute-capture-folder> --state pending --limit 20` reads only metadata offline, without binding configuration, initialization or migration. States are `pending`, `synced` and `all`; limits are 1–50, default 20. `item.noteId` selects a note and `page.nextAfter` provides live oldest-first pagination. `journal retry --note <UUID>` runs from the original bound folder and verifies the saved parent and first authenticated user/workspace/generation before POST. It can retry a retained older session after a new current session starts. Only an exact acknowledgement marks the row synced; uncertain/denied/deleted responses retain it. Identical HTTP retries do not duplicate the immutable note. A retained synced receipt returns without HTTP or credentials and is historical acknowledgement, not proof of current server retention.
+
+There is no automatic journal flush, queue editing/drop command, bulk retry or command execution. Command `run`/`sync` does not send journal notes. The plaintext local queue is private, known-pattern redaction is incomplete, and server-only backups exclude it. The `/capture-recovery#journal-recovery` builder only generates copyable instructions and collects no note bodies. See [JOURNAL_RECOVERY.md](JOURNAL_RECOVERY.md) for the complete manual flow and [STATUS.md](STATUS.md) for checks actually completed. MCP remains fourteen read-only tools.
 
 `npm run acceptance:journal` launches the compiled website and an isolated in-memory API store. It uses explicitly synthetic command metadata to check journal contracts, browser mutation guards, retries, redaction, CLI, Ask, note pages and actual MCP stdio. It loads no real user evidence and calls no GitHub or AI service; its report is `.memvora/journal-acceptance.json`. Existing real command/source acceptance checks remain separate.
 
@@ -241,20 +247,20 @@ Known credential patterns, the local token, password/token arguments and private
 
 ## 6. Website routes
 
-| Route                     | Purpose                                                                      |
-| ------------------------- | ---------------------------------------------------------------------------- |
-| `/`                       | Counts and recent recorded work in the local workspace.                      |
-| `/repositories`           | Explicit local registration plus optional GitHub browsing/import.            |
-| `/repositories/[id]`      | Repository details, imported context and relevant sessions.                  |
-| `/sessions`               | Server-filtered live investigation directory with bounded older pages.       |
-| `/sessions/[id]`          | Captured attempts and generated/observed memories.                           |
-| `/sessions/[id]/handover` | Personal report preview, coverage and Markdown/JSON downloads.               |
-| `/events/[id]`            | Original command, outcome, output and tracked diffs.                         |
-| `/memories/[id]`          | Summary, mode, steps, uncertainty and source links.                          |
-| `/ask`                    | Source-linked recall with repository filtering.                              |
-| `/jobs`                   | Scoped processing states, attempt history and explicit failed-summary retry. |
-| `/settings`               | Actual local storage/enrichment settings, limits and connection diagnostics. |
-| `/capture-recovery`       | Manual offline outbox-list and selected-sync command guide.                  |
+| Route                     | Purpose                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| `/`                       | Counts and recent recorded work in the local workspace.                        |
+| `/repositories`           | Explicit local registration plus optional GitHub browsing/import.              |
+| `/repositories/[id]`      | Repository details, imported context and relevant sessions.                    |
+| `/sessions`               | Server-filtered live investigation directory with bounded older pages.         |
+| `/sessions/[id]`          | Captured attempts and generated/observed memories.                             |
+| `/sessions/[id]/handover` | Personal report preview, coverage and Markdown/JSON downloads.                 |
+| `/events/[id]`            | Original command, outcome, output and tracked diffs.                           |
+| `/memories/[id]`          | Summary, mode, steps, uncertainty and source links.                            |
+| `/ask`                    | Source-linked recall with repository filtering.                                |
+| `/jobs`                   | Scoped processing states, attempt history and explicit failed-summary retry.   |
+| `/settings`               | Actual local storage/enrichment settings, limits and connection diagnostics.   |
+| `/capture-recovery`       | Manual capture outbox and authored-journal inspection/selected-retry commands. |
 
 The first-run workspace is empty. Counts and memories reflect stored data, not showcase samples. Processing may briefly lag ingestion. A failed provider job leaves raw event detail available. Open Memory processing to filter by repository, investigation or state. Failed summaries can be retried explicitly after fixing their configuration; running, queued and ready jobs cannot be reset. Each cycle has three automatic attempts, and manual retry counts remain visible. A retry uses the same accepted evidence and the current summary configuration, which can send it to a configured AI endpoint again.
 

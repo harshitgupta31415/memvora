@@ -14,11 +14,13 @@ Investigation discovery applies title, repository and open/closed filters on the
 
 The local [setup guide](http://127.0.0.1:3000/setup) generates PowerShell commands for capturing another repository and a read-only MCP configuration using this installation's absolute paths. Repeating `init` verifies an existing binding without replacing its investigation or local outbox. A different repository/API selector requires deliberate separate setup; initialization never silently rebinds stored captures.
 
-CLI and MCP version 0.6.0 are also available together as a private local npm tarball. [CLIENT_INSTALLATION.md](docs/CLIENT_INSTALLATION.md) covers offline installation outside this checkout, explicit server credentials, upgrades and removal. The website/API remain separate; installation does not add remote authentication.
+CLI and MCP version 0.7.0 are also available together as a private local npm tarball. [CLIENT_INSTALLATION.md](docs/CLIENT_INSTALLATION.md) covers offline installation outside this checkout, explicit server credentials, upgrades and removal. The website/API remain separate; installation does not add remote authentication.
 
 [Optional investigation interpretation](docs/SESSION_SYNTHESIS.md) provides explicitly requested, cited AI hypotheses across bounded original attempts and authored notes. It is disabled by default, independent of per-command enrichment, and available through the website/CLI with read-only MCP retrieval. Opening a page or asking a recall question never queues it.
 
 Retained request history makes older ready, failed and stale versions discoverable. The browser also retains an unconfirmed submission's scoped UUID/hash across reloads in the same tab, without automatically submitting it again.
+
+[Durable journal recovery](docs/JOURNAL_RECOVERY.md) is an opt-in CLI workflow: `session note --queue` retains a prepared user report offline for the current bound investigation, `journal list` inspects metadata, and `journal retry --note <UUID>` deliberately submits one original identity. Queueing is not server acceptance. Default direct note saves and the browser's in-memory drafts remain unchanged; fourteen MCP tools remain read-only. The [manual recovery guide](http://127.0.0.1:3000/capture-recovery#journal-recovery) only generates commands.
 
 The [backup guide](http://127.0.0.1:3000/backups) provides a manual local operator workflow for complete SQLite snapshots and read-only verification. It preserves stored history and deletion state while keeping the external token, environment files and unsynced CLI outboxes separate. Live database replacement remains a separate recovery workflow.
 
@@ -68,6 +70,7 @@ The smoke command deliberately exits unsuccessfully. It is a test input, not a c
 - [Local setup, flow and limits](docs/LOCAL_MVP.md)
 - [Verified checkpoint and next work](docs/STATUS.md)
 - [Verified database backups and recovery limits](docs/BACKUPS.md)
+- [Offline authored-note queue and selected retry](docs/JOURNAL_RECOVERY.md)
 - [Full PRD](docs/PRD.md)
 - [Target architecture and actual-flow design](docs/ARCHITECTURE.md)
 - [Target API, CLI and MCP contracts](docs/API.md)
@@ -97,6 +100,8 @@ Run resource-intensive commands through `scripts/with-resource-limits.ps1`, as i
 | `npm run cli -- init`                                                     | Initialize a new local binding, or verify an existing one without replacing its investigation/outbox.            |
 | `npm run cli -- run -- <command> [args...]`                               | Capture a supported explicit command.                                                                            |
 | `npm run cli -- sync`                                                     | Retry pending evidence without changing event identity.                                                          |
+| `npm run cli -- session note --text "Your report" --queue`                | Retain an authored note locally for the current bound investigation; no server contact.                          |
+| `npm run cli -- journal retry --note <UUID>`                              | Explicitly submit one saved journal note from its original bound capture folder.                                 |
 | `npm run cli -- ask <question>`                                           | Retrieve cited evidence for the bound repository.                                                                |
 | `npm run cli -- session export <id> --format markdown --output report.md` | Export one bounded investigation into a new file; existing files are never overwritten.                          |
 | `npm run mcp`                                                             | Start the built stdio adapter. Use direct Node in an MCP host to keep stdout clean.                              |
