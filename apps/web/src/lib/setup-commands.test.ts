@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { nodePowerShellCommand, parseSetupQuery, quotePowerShellArgument } from './setup-commands';
+import {
+  backupPowerShellCommands,
+  nodePowerShellCommand,
+  parseSetupQuery,
+  quotePowerShellArgument,
+} from './setup-commands';
 
 const repositoryId = 'a0000000-0000-4000-8000-000000000001';
 
@@ -51,5 +56,29 @@ describe('PowerShell command argument safety', () => {
     ).toBe(
       "node '--env-file-if-exists=C:\\Developer''s projects\\memvora\\.env' 'C:\\Memvora\\apps\\cli\\dist\\index.js' '--api-url' 'http://127.0.0.1:49001' '--home' 'C:\\Private evidence' 'run' '--' 'npm' 'test'",
     );
+  });
+});
+
+describe('manual backup commands', () => {
+  it('uses a fresh result variable and the exact create result for verification', () => {
+    const commands = backupPowerShellCommands({
+      wrapper: 'C:\\Memvora\\scripts\\with-resource-limits.ps1',
+      envFile: 'C:\\Memvora\\.env',
+      script: 'C:\\Memvora\\scripts\\backup-local.mjs',
+      dataDirectory: "C:\\Developer's private data\\$env:TEMP; `whoami` # literal",
+    });
+    expect(commands.create).toContain('$memvoraBackup = $null\n$memvoraBackup = (');
+    expect(commands.create).toContain(
+      "& 'C:\\Memvora\\scripts\\with-resource-limits.ps1' node '--env-file-if-exists=C:\\Memvora\\.env' 'C:\\Memvora\\scripts\\backup-local.mjs' 'create' '--data-dir' 'C:\\Developer''s private data\\$env:TEMP; `whoami` # literal' | ConvertFrom-Json -ErrorAction Stop)",
+    );
+    expect(commands.create).toContain('$LASTEXITCODE -ne 0');
+    expect(commands.create).not.toContain("'--output'");
+    expect(commands.verify).toContain(
+      "& 'C:\\Memvora\\scripts\\with-resource-limits.ps1' node '--env-file-if-exists=C:\\Memvora\\.env' 'C:\\Memvora\\scripts\\backup-local.mjs' 'verify' '--input' $memvoraBackup.directory",
+    );
+    expect(commands.verify).toContain('Run the create command in this PowerShell session first.');
+    expect(commands.verify).toContain('$LASTEXITCODE -ne 0');
+    expect(commands.verify).not.toContain('Get-ChildItem');
+    expect(commands.verify).not.toContain('restore');
   });
 });

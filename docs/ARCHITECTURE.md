@@ -22,6 +22,8 @@ flowchart LR
 
 Web, CLI and MCP never connect directly to the database. The API and worker share domain code and schema but have distinct process lifecycles. Domain modules call one another in process. Shared PostgreSQL ownership and transactions keep this a modular monolith, even though there are multiple executable applications.
 
+The implemented local backup operator is a separate administrative boundary: `scripts/backup-local.mjs` runs on the database-owning machine with filesystem permissions and calls the SQLite backup helper in `packages/db`. Normal website, capture CLI and MCP evidence requests remain API-backed. There is no arbitrary-filesystem API route or browser raw-database download. This operator opens the existing source read-only, uses SQLite online backup into an exclusively new directory and validates the completed single-file copy before publishing its manifest. Verification performs no migration, provider request, worker processing or live restore. External credential files/outboxes remain separate; the complete database still contains private signing and encrypted connection state. See [BACKUPS.md](BACKUPS.md).
+
 | Workspace            | Responsibility                                                                    | Allowed dependencies                           |
 | -------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------- |
 | `apps/web`           | Next.js App Router interface, web session presentation, timeline and recall       | contracts and API client; no direct DB access  |

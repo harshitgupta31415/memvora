@@ -100,6 +100,9 @@ export default async function Settings({
               The browser never receives the workspace token. Captured evidence is stored locally;
               keep the data directory private.
             </p>
+            <Link href="/backups" className="inline-link">
+              Create and verify a manual backup <Icon name="arrow" size={13} />
+            </Link>
           </section>
           <section className="panel settings-panel">
             <h2>

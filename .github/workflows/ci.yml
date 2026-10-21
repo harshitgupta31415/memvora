@@ -31,3 +31,4 @@ jobs:
       - run: npm run acceptance:journal
       - run: npm run acceptance:directory
       - run: npm run acceptance:setup
+      - run: npm run acceptance:backup

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -19,6 +19,7 @@ const store = new SqliteEvidenceStore(':memory:');
 const service = new LocalMemvora(store);
 const app = buildApp({ store, token, embeddedWorker: false });
 const children = [];
+const childStates = new WeakMap();
 let apiRequests = 0;
 app.addHook('onRequest', async () => {
   apiRequests++;
@@ -34,6 +35,78 @@ function safe(value) {
   assert.ok(!String(value).includes(token), 'A fixture credential was exposed.');
   assert.ok(!String(value).includes('SetupForeignPrivateName'), 'Foreign metadata was exposed.');
 }
+function ownChild(child) {
+  const state = { closed: false, done: undefined, stopping: undefined };
+  state.done = new Promise((done) =>
+    child.once('close', () => {
+      state.closed = true;
+      done();
+    }),
+  );
+  childStates.set(child, state);
+  children.push(child);
+  return child;
+}
+async function waitForClose(state, milliseconds) {
+  if (state.closed) return true;
+  let timer;
+  try {
+    return await Promise.race([
+      state.done.then(() => true),
+      new Promise((done) => {
+        timer = setTimeout(() => done(false), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+/** Only spawned roots belong to this test; POSIX roots have their own process groups. */
+async function stop(child) {
+  const state = childStates.get(child);
+  if (!state) throw new Error('Refusing to stop an unowned setup process.');
+  if (state.stopping) return state.stopping;
+  state.stopping = (async () => {
+    if (state.closed) return;
+    if (!Number.isSafeInteger(child.pid) || child.pid < 1) {
+      if (await waitForClose(state, 1000)) return;
+      throw new Error('Setup process cleanup could not be confirmed. Fixture retained.');
+    }
+    if (process.platform === 'win32') {
+      // Do not reuse an exited root PID: its descendants must close their inherited pipes.
+      if (child.exitCode === null && child.signalCode === null)
+        await new Promise((done) =>
+          execFile(
+            'taskkill',
+            ['/PID', String(child.pid), '/T', '/F'],
+            { windowsHide: true, timeout: 5000 },
+            () => done(),
+          ),
+        );
+    } else {
+      try {
+        process.kill(-child.pid, 'SIGTERM');
+      } catch (error) {
+        if (error?.code !== 'ESRCH')
+          throw new Error('Setup process group cleanup failed. Fixture retained.');
+      }
+      await waitForClose(state, 1000);
+      // The root may have exited while an ignoring descendant remains in the owned group.
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch (error) {
+        if (error?.code !== 'ESRCH')
+          throw new Error('Setup process group cleanup failed. Fixture retained.');
+      }
+    }
+    if (!(await waitForClose(state, 3000)))
+      throw new Error('Setup process cleanup could not be confirmed. Fixture retained.');
+  })();
+  return state.stopping;
+}
+function requestStop(child) {
+  void stop(child).catch(() => {});
+}
 function spawnNode(args, options = {}) {
   const child = spawn(process.execPath, args, {
     cwd: root,
@@ -41,36 +114,43 @@ function spawnNode(args, options = {}) {
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     ...options,
+    detached: process.platform !== 'win32',
   });
-  children.push(child);
-  return child;
+  return ownChild(child);
 }
 async function cli(cwd, args, expected = 0) {
   const child = spawnNode([resolve(root, 'apps/cli/dist/index.js'), ...args], { cwd });
   let stdout = '';
   let stderr = '';
   let overflow = false;
+  let timedOut = false;
   const collect = (target) => (chunk) => {
+    if (overflow) return;
     if (target === 'stdout') stdout += chunk;
     else stderr += chunk;
     if (stdout.length + stderr.length > 256 * 1024) {
       overflow = true;
-      child.kill();
+      requestStop(child);
     }
   };
   child.stdout.on('data', collect('stdout'));
   child.stderr.on('data', collect('stderr'));
-  const timer = setTimeout(() => child.kill(), 20_000);
+  const timer = setTimeout(() => {
+    timedOut = true;
+    requestStop(child);
+  }, 20_000);
   try {
     const [code] = await once(child, 'close');
     assert.equal(code, expected, 'Compiled setup CLI returned an unexpected status.');
     assert.equal(overflow, false);
+    assert.equal(timedOut, false, 'Compiled setup CLI timed out.');
     safe(stdout);
     safe(stderr);
     if (expected) assert.ok(stderr.trim());
     return { stdout, stderr };
   } finally {
     clearTimeout(timer);
+    await stop(child);
   }
 }
 async function freePort() {
@@ -80,20 +160,6 @@ async function freePort() {
   const port = socket.address().port;
   await new Promise((done, reject) => socket.close((error) => (error ? reject(error) : done())));
   return port;
-}
-async function stop(child) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  await new Promise((done) => {
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      done();
-    }, 5000);
-    child.once('exit', () => {
-      clearTimeout(timer);
-      done();
-    });
-    child.kill();
-  });
 }
 function decodeHtml(value) {
   return value.replace(
@@ -135,8 +201,12 @@ async function verifyMcpConfiguration(configuration, expectedApi) {
     pending.clear();
   };
   child.stdout.on('data', (chunk) => {
+    if (protocolError) return;
     buffer += chunk;
-    if (buffer.length > 512 * 1024) return fail(new Error('Setup MCP buffer exceeded.'));
+    if (buffer.length > 512 * 1024) {
+      requestStop(child);
+      return fail(new Error('Setup MCP buffer exceeded.'));
+    }
     while (buffer.includes('\n')) {
       const end = buffer.indexOf('\n');
       const line = buffer.slice(0, end);
@@ -359,6 +429,113 @@ try {
   const denied = await html(`?repositoryId=${foreign.id}`);
   assert.ok(!denied.includes('--repository-id'));
   assert.ok(!denied.includes('mcpServers'));
+  // A separate disposable on-disk store proves the guide's actual operator commands.
+  // The API above deliberately remains backed by the isolated in-memory store.
+  const backupFixture = new SqliteEvidenceStore(resolve(fixture, 'server.sqlite'));
+  new LocalMemvora(backupFixture).createRepository({ name: 'Synthetic backup guide fixture' });
+  backupFixture.close();
+  const backupSourceBefore = readFileSync(resolve(fixture, 'server.sqlite'));
+  const beforeBackupGuideApi = apiRequests;
+  const backupHtml = async (query = '') => {
+    const response = await fetch(`${web}/backups${query}`, {
+      signal: AbortSignal.timeout(15_000),
+      redirect: 'error',
+    });
+    assert.equal(response.status, 200);
+    const value = await response.text();
+    safe(value);
+    return value;
+  };
+  const backupGuide = await backupHtml();
+  const command = (id) => {
+    const block = backupGuide.match(
+      new RegExp(`<div id="${id}">([\\s\\S]*?)<code>([\\s\\S]*?)<\\/code>`, 'u'),
+    );
+    assert.ok(block, 'Backup guide did not expose a copyable operator command.');
+    return decodeHtml(block[2]);
+  };
+  const createCommand = command('memvora-backup-create');
+  const verifyCommand = command('memvora-backup-verify');
+  assert.ok(createCommand.includes("'create' '--data-dir'"));
+  assert.ok(createCommand.includes(fixture.replaceAll("'", "''")));
+  assert.ok(createCommand.includes('ConvertFrom-Json'));
+  assert.ok(verifyCommand.includes("'verify' '--input'"));
+  assert.ok(verifyCommand.includes('$memvoraBackup.directory'));
+  assert.ok(!backupGuide.includes('created_and_verified'));
+  for (const query of ['?unexpected=true', '?output=one&output=two']) {
+    const invalidGuide = await backupHtml(query);
+    assert.ok(invalidGuide.includes('This backup guide link is invalid'));
+    assert.ok(!invalidGuide.includes('id="memvora-backup-create"'));
+    assert.ok(!invalidGuide.includes('id="memvora-backup-verify"'));
+  }
+  assert.equal(apiRequests, beforeBackupGuideApi, 'Backup instructions called the evidence API.');
+  let actualPowerShellBackup = false;
+  if (process.platform === 'win32') {
+    const code = `${createCommand}\n${verifyCommand}\nWrite-Output ('MEMVORA_GUIDE_DIRECTORY=' + $memvoraBackup.directory)\n`;
+    const child = ownChild(
+      spawn(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-EncodedCommand',
+          Buffer.from(code, 'utf16le').toString('base64'),
+        ],
+        {
+          cwd: fixture,
+          env: environment,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      ),
+    );
+    let stdout = '';
+    let stderr = '';
+    let overflow = false;
+    let timedOut = false;
+    child.stdout.on('data', (chunk) => {
+      if (overflow) return;
+      stdout += chunk;
+      if (stdout.length > 256 * 1024) {
+        overflow = true;
+        requestStop(child);
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      if (overflow) return;
+      stderr += chunk;
+      if (stderr.length > 65536) {
+        overflow = true;
+        requestStop(child);
+      }
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      requestStop(child);
+    }, 30_000);
+    try {
+      const [exit] = await once(child, 'close');
+      safe(stdout);
+      safe(stderr);
+      assert.equal(overflow, false);
+      assert.equal(timedOut, false, 'Actual copied PowerShell backup commands timed out.');
+      assert.equal(exit, 0, 'Actual copied PowerShell backup commands failed.');
+      const directory = stdout.match(/^MEMVORA_GUIDE_DIRECTORY=(.+)$/mu)?.[1]?.trim();
+      assert.ok(
+        directory &&
+          resolve(directory).startsWith(
+            `${resolve(fixture, 'backups')}${process.platform === 'win32' ? '\\' : '/'}`,
+          ),
+      );
+      const { verifyLocalBackup } = await import('../packages/db/dist/local-backup.js');
+      await verifyLocalBackup(directory);
+      actualPowerShellBackup = true;
+    } finally {
+      clearTimeout(timer);
+      await stop(child);
+    }
+  }
+  assert.deepEqual(readFileSync(resolve(fixture, 'server.sqlite')), backupSourceBefore);
   assert.equal(
     store.database.prepare('SELECT total_changes() AS count').get().count,
     beforeWeb,
@@ -386,10 +563,12 @@ try {
       'compiled_web_cli_and_mcp_setup',
       'generated_mcp_configuration_actual_stdio_connection',
       'invalid_web_queries_fail_before_api',
+      'compiled_backup_guide_without_api_access',
+      ...(actualPowerShellBackup ? ['actual_rendered_powershell_backup_create_and_verify'] : []),
       'no_credentials_in_output',
     ],
     notice:
-      'Only isolated in-memory repository/session metadata and disposable outbox rows marked synthetic. No commands were executed, no evidence was uploaded, and no user data, GitHub or AI provider was used.',
+      'Isolated in-memory metadata, a separate disposable on-disk backup fixture, and synthetic outbox rows. On Windows the actual rendered PowerShell backup commands run against that fixture. No target command capture, user data, GitHub or AI provider was used.',
   };
   mkdirSync(resolve(root, '.memvora'), { recursive: true });
   writeFileSync(
@@ -398,8 +577,10 @@ try {
   );
   console.log(JSON.stringify(report, null, 2));
 } finally {
-  await Promise.all(children.map(stop));
+  const cleanup = await Promise.allSettled(children.map(stop));
   await app.close();
+  if (cleanup.some((result) => result.status === 'rejected'))
+    throw new Error('Setup process cleanup could not be confirmed. Fixture retained.');
   const target = resolve(fixture);
   if (dirname(target) !== resolve(tmpdir()) || !basename(target).startsWith('memvora-setup-'))
     throw new Error('Unexpected setup fixture cleanup path.');

@@ -119,6 +119,10 @@ This token identifies a trusted-machine development workspace. It is not GitHub 
 
 Repository capture data lives in `<captured-repository>/.memvora/config.json` and `outbox.sqlite`; it remains separate from the server's token and evidence database. Initialization creates a nested `.memvora/.gitignore` before storing data, and preserves an existing ignore file. Verify local capture data remains excluded before committing. Back up local data deliberately if it matters; normal build output is not a backup.
 
+### Database recovery points
+
+Use the local `/backups` guide or `npm run backup:local -- create` through the resource wrapper to create a new complete SQLite snapshot. `npm run backup:local -- verify --input <absolute-backup-directory>` checks the same saved copy read-only. The operator uses SQLite's online backup mechanism, writes its completion manifest last and refuses an existing destination. It preserves accepted evidence, imported versions, search state, counters, deletion fences and encrypted connection state. It excludes external credentials/environment and repository-local outboxes, so unuploaded commands need a separate copy. The raw snapshot contains private records and signing material and is not encrypted as a whole. See [BACKUPS.md](BACKUPS.md) for paths, Windows access controls, size/time limits and the disposable synthetic recovery rehearsal. No live restore or replacement command is implemented.
+
 ## 4. Capture a real investigation
 
 In a second terminal from the project root:

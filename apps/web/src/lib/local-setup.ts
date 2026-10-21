@@ -1,7 +1,11 @@
 import 'server-only';
 import { stat } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
-import { nodePowerShellCommand, quotePowerShellArgument } from './setup-commands';
+import {
+  backupPowerShellCommands,
+  nodePowerShellCommand,
+  quotePowerShellArgument,
+} from './setup-commands';
 
 export function localSetupPaths() {
   const root = resolve(process.cwd(), '../..');
@@ -113,5 +117,39 @@ export async function localSetupDetails() {
       null,
       2,
     ),
+  };
+}
+
+export async function localBackupDetails() {
+  const configuration = localRuntimeConfiguration();
+  if (!configuration.ok) return configuration;
+  if (/^[/\\]{2}/u.test(configuration.dataDirectory))
+    return {
+      ok: false as const,
+      message:
+        'Manual backups require an absolute local data directory. Network paths are not supported by the backup utility.',
+    };
+  const paths = localSetupPaths();
+  const script = resolve(paths.root, 'scripts/backup-local.mjs');
+  const backupEntry = resolve(paths.root, 'packages/db/dist/local-backup.js');
+  const source = resolve(configuration.dataDirectory, 'server.sqlite');
+  const [scriptPresent, databaseBuilt, sourcePresent] = await Promise.all([
+    isFile(script),
+    isFile(backupEntry),
+    isFile(source),
+  ]);
+  return {
+    ...configuration,
+    source,
+    defaultDestination: resolve(configuration.dataDirectory, 'backups'),
+    scriptPresent,
+    databaseBuilt,
+    sourcePresent,
+    commands: backupPowerShellCommands({
+      wrapper: paths.wrapper,
+      envFile: paths.envFile,
+      script,
+      dataDirectory: configuration.dataDirectory,
+    }),
   };
 }

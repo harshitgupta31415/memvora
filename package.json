@@ -40,6 +40,8 @@
     "acceptance:journal": "node scripts/acceptance-journal.mjs",
     "acceptance:directory": "node scripts/acceptance-directory.mjs",
     "acceptance:setup": "node scripts/acceptance-setup.mjs",
+    "backup:local": "node --env-file-if-exists=.env scripts/backup-local.mjs",
+    "acceptance:backup": "node scripts/acceptance-backup.mjs",
     "acceptance:github-oauth": "node scripts/acceptance-github-oauth.mjs"
   },
   "devDependencies": {

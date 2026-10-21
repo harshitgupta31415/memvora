@@ -21,6 +21,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     ...navigation,
     { href: '/settings', label: 'Settings' },
     { href: '/setup', label: 'Local setup' },
+    { href: '/backups', label: 'Backup guide' },
   ].find((item) => (item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)));
   return (
     <div className="app-shell">
@@ -83,7 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/settings"
             onClick={() => setOpen(false)}
-            className={`nav-item ${pathname.startsWith('/settings') ? 'active' : ''}`}
+            className={`nav-item ${pathname.startsWith('/settings') || pathname.startsWith('/backups') ? 'active' : ''}`}
           >
             <Icon name="settings" size={19} />
             Settings

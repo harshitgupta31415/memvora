@@ -308,6 +308,11 @@ export default async function LocalSetup({
             <Link href="/settings" className="inline-link">
               Review workspace settings <Icon name="arrow" size={13} />
             </Link>
+            <div className={styles.links}>
+              <Link href="/backups" className="inline-link">
+                Back up and verify local evidence <Icon name="arrow" size={13} />
+              </Link>
+            </div>
           </div>
         </section>
       </div>

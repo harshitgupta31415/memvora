@@ -5,6 +5,7 @@ import * as schema from './schema.js';
 export * from './schema.js';
 export * from './sqlite-store.js';
 export * from './local-config.js';
+export * from './local-backup.js';
 
 /** Lazy factory: importing this package never connects to PostgreSQL. */
 export function createDatabase(connectionString: string) {

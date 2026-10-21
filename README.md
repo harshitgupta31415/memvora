@@ -14,6 +14,8 @@ Investigation discovery applies title, repository and open/closed filters on the
 
 The local [setup guide](http://127.0.0.1:3000/setup) generates PowerShell commands for capturing another repository and a read-only MCP configuration using this installation's absolute paths. Repeating `init` verifies an existing binding without replacing its investigation or local outbox. A different repository/API selector requires deliberate separate setup; initialization never silently rebinds stored captures.
 
+The [backup guide](http://127.0.0.1:3000/backups) provides a manual local operator workflow for complete SQLite snapshots and read-only verification. It preserves stored history and deletion state while keeping the external token, environment files and unsynced CLI outboxes separate. Live database replacement remains a separate recovery workflow.
+
 ## Start locally
 
 Use Node.js **24** or **26**, and npm **11 or later**. Open PowerShell in this folder:
@@ -59,6 +61,7 @@ The smoke command deliberately exits unsuccessfully. It is a test input, not a c
 
 - [Local setup, flow and limits](docs/LOCAL_MVP.md)
 - [Verified checkpoint and next work](docs/STATUS.md)
+- [Verified database backups and recovery limits](docs/BACKUPS.md)
 - [Full PRD](docs/PRD.md)
 - [Target architecture and actual-flow design](docs/ARCHITECTURE.md)
 - [Target API, CLI and MCP contracts](docs/API.md)
