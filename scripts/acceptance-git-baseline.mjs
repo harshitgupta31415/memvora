@@ -88,6 +88,53 @@ function safe(value) {
       'Private fixture data reached a retained or displayed result.',
     );
 }
+function failureDiagnostic(error) {
+  if (error?.acceptanceDiagnostic) return error.acceptanceDiagnostic;
+  const allowedCodes = new Set([
+    'ENOENT',
+    'EACCES',
+    'EPERM',
+    'EEXIST',
+    'ENOTDIR',
+    'EADDRINUSE',
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'ERR_ASSERTION',
+    'ERR_SQLITE_ERROR',
+    'ERR_INVALID_ARG_TYPE',
+    'ERR_INVALID_ARG_VALUE',
+  ]);
+  return {
+    reason: error?.code === 'ERR_ASSERTION' ? 'assertion_failed' : 'operation_failed',
+    code: allowedCodes.has(error?.code) ? error.code : 'OTHER',
+  };
+}
+function childFailure(reason, state, result) {
+  const error = new Error('A synthetic fixture child failed; raw diagnostics were withheld.');
+  const stderrCategories = [
+    ['git_boundary', /Git returned a repository root outside the current directory/u],
+    ['repository_verification', /The selected repository could not be verified/u],
+    ['repository_response', /The API repository response did not match/u],
+    ['session_creation', /Initial investigation creation could not be confirmed/u],
+    ['session_response', /The initial investigation response did not match/u],
+    ['configuration_write', /The new binding could not be committed exclusively/u],
+    ['configuration_validation', /An existing local binding could not be validated/u],
+    ['credential', /local API credential|local-token|MEMVORA_LOCAL_TOKEN/u],
+  ];
+  error.acceptanceDiagnostic = {
+    reason,
+    exitCode: Number.isSafeInteger(result?.code) ? result.code : null,
+    signal: ['SIGTERM', 'SIGKILL', 'SIGABRT', 'SIGSEGV', 'SIGINT', 'SIGBREAK', 'SIGHUP'].includes(
+      result?.signal,
+    )
+      ? result.signal
+      : null,
+    spawnCode: state.spawnCode ?? null,
+    stderrCategory:
+      stderrCategories.find(([, pattern]) => pattern.test(state.stderr))?.[0] ?? 'unclassified',
+  };
+  return error;
+}
 function withinFixture(path) {
   const difference = relative(fixture, realpathSync(path));
   assert.ok(
@@ -185,8 +232,12 @@ function start(executable, args, { cwd = captureRoot, interactive = false } = {}
       done({ code, signal });
     }),
   );
-  child.on('error', () => {
+  child.on('error', (error) => {
     state.failed = true;
+    state.failureReason = 'child_spawn_failed';
+    state.spawnCode = ['ENOENT', 'EACCES', 'EPERM', 'EINVAL', 'E2BIG'].includes(error.code)
+      ? error.code
+      : 'OTHER';
   });
   for (const channel of ['stdout', 'stderr']) {
     const decoder = new StringDecoder('utf8');
@@ -194,6 +245,7 @@ function start(executable, args, { cwd = captureRoot, interactive = false } = {}
       state.bytes += chunk.length;
       if (state.bytes > 2 * 1024 * 1024) {
         state.failed = true;
+        state.failureReason = 'child_output_limit';
         void stop(child).catch(() => {});
         return;
       }
@@ -216,18 +268,15 @@ async function run(executable, args, options = {}) {
       new Promise((_done, reject) => {
         timer = setTimeout(() => {
           void stop(child)
-            .finally(() => reject(new Error('Git-baseline child timed out.')))
+            .finally(() => reject(childFailure('child_timeout', state)))
             .catch(() => {});
         }, 30_000);
       }),
     ]);
-    assert.equal(
-      result.code,
-      options.expected ?? 0,
-      'An actual fixture command returned an unexpected exit.',
-    );
-    assert.equal(result.signal, null);
-    assert.equal(state.failed, false);
+    if (state.failed) throw childFailure(state.failureReason ?? 'child_failed', state, result);
+    if (result.code !== (options.expected ?? 0))
+      throw childFailure('child_unexpected_exit', state, result);
+    if (result.signal !== null) throw childFailure('child_signal', state, result);
     safe(state.stdout);
     safe(state.stderr);
     return { stdout: state.stdout, stderr: state.stderr };
@@ -406,12 +455,17 @@ function startMcp() {
 }
 
 try {
+  stage = 'create tracked fixture directory';
   mkdirSync(captureRoot);
+  stage = 'create unborn fixture directory';
   mkdirSync(unbornRoot);
+  stage = 'resolve actual Git executable from absolute PATH';
   const git = gitExecutable();
   const gitRun = async (args, directory = captureRoot) =>
     (await run(git, args, { cwd: directory })).stdout.trim();
   for (const directory of [captureRoot, unbornRoot]) {
+    const repositoryLabel = directory === captureRoot ? 'tracked' : 'unborn';
+    stage = `initialize ${repositoryLabel} Git repository`;
     await gitRun(['init', '-q'], directory);
     for (const [key, value] of [
       ['user.name', 'harshitgupta31415'],
@@ -421,27 +475,42 @@ try {
       ['core.autocrlf', 'false'],
       ['core.safecrlf', 'false'],
       ['core.attributesFile', join(fixture, 'nonexistent-attributes')],
-    ])
+    ]) {
+      stage = `configure ${repositoryLabel} Git repository ${key}`;
       await gitRun(['config', '--local', key, value], directory);
+    }
   }
+  stage = 'write original tracked fixture files';
   writeFileSync(join(captureRoot, 'tracked.txt'), 'BaselineOriginalLine\n');
   writeFileSync(join(captureRoot, '.gitattributes'), '* text eol=lf -filter\n');
   writeFileSync(join(captureRoot, '.env.baseline-fixture'), 'EXCLUDED=original-placeholder\n');
+  stage = 'stage original tracked fixture files';
   await gitRun(['add', '-f', '--', 'tracked.txt', '.gitattributes', '.env.baseline-fixture']);
+  stage = 'create original tracked fixture commit';
   await gitRun(['commit', '-qm', 'Synthetic baseline fixture initial commit']);
+  stage = 'resolve original tracked fixture HEAD';
   const initialSha = await gitRun(['rev-parse', '--verify', 'HEAD']);
   assert.match(initialSha, /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u);
+  stage = 'write pre-existing tracked and excluded fixture edits';
   writeFileSync(join(captureRoot, 'tracked.txt'), `BaselineOriginalLine\n${preexistingMarker}\n`);
   writeFileSync(join(captureRoot, '.env.baseline-fixture'), `EXCLUDED=${excludedMarker}\n`);
   writeFileSync(join(captureRoot, 'untracked-private.txt'), `${untrackedMarker}\n`);
+  stage = 'listen on isolated loopback API';
   apiOrigin = await app.listen({ host: '127.0.0.1', port: 0 });
   environment.MEMVORA_API_URL = apiOrigin;
+  stage = 'register tracked fixture repository';
   const repository = service.createRepository({ name: 'Synthetic fixed-baseline Git repository' });
+  stage = 'register unborn fixture repository';
   const unbornRepository = service.createRepository({ name: 'Synthetic unborn Git repository' });
+  stage = 'initialize tracked CLI binding';
   await cli(['init', '--repository-id', repository.id]);
+  stage = 'initialize unborn CLI binding';
   await cli(['init', '--repository-id', unbornRepository.id], { cwd: unbornRoot });
+  stage = 'read tracked CLI binding';
   const mainBinding = binding(captureRoot);
+  stage = 'read unborn CLI binding';
   const unbornBinding = binding(unbornRoot);
+  stage = 'resolve isolated local context';
   const context = service.context();
 
   stage = 'pre-existing tracked edit and captured append share one fixed baseline';
@@ -684,14 +753,16 @@ try {
     handoverAndSynthesisProvenance: true,
     checkedAt: new Date().toISOString(),
   };
-} catch {
+} catch (error) {
+  const diagnostic = failureDiagnostic(error);
   console.error(
-    `Git baseline acceptance failed during ${stage}; no private fixture payload was printed.`,
+    `Git baseline acceptance failed during ${stage}; diagnostic=${JSON.stringify(diagnostic)}; no private fixture payload was printed.`,
   );
   report = {
     status: 'failed',
     syntheticFixturesOnly: true,
     stage,
+    diagnostic,
     checkedAt: new Date().toISOString(),
   };
   process.exitCode = 1;

@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -132,6 +133,7 @@ describe('idempotent local CLI initialization', () => {
       const options = { cwd: root, repositoryId, apiUrl: origin };
       for (let attempt = 0; attempt < 2; attempt++) {
         const result = await initializeRepository(options, { git: git(root) });
+        expect(result.root).toBe(root);
         expect(result.mode).toBe('existing');
         expect(result.sessionStatus).toBe(status);
         expect(result.binding.sessionId).toBe(sessionId);
@@ -173,6 +175,99 @@ describe('idempotent local CLI initialization', () => {
     );
     expect(initialized.root).toBe(unversioned);
     expect(initialized.mode).toBe('created');
+  });
+
+  it.each(['cwd_alias', 'git_alias', 'same_alias'] as const)(
+    'verifies the nearest existing binding across physical Git aliases (%s) without changing bytes',
+    async (variant) => {
+      const parent = fixtureDirectory();
+      const physicalRoot = join(parent, 'physical-repository');
+      const physicalBound = join(physicalRoot, 'bound-subfolder');
+      mkdirSync(join(physicalBound, 'deep'), { recursive: true });
+      const alias = join(parent, 'repository-alias');
+      symlinkSync(physicalRoot, alias, process.platform === 'win32' ? 'junction' : 'dir');
+      storedBinding(parent);
+      const stored = storedBinding(physicalBound);
+      const fetcher = transport();
+      const cwd = join(variant === 'git_alias' ? physicalRoot : alias, 'bound-subfolder', 'deep');
+      const boundary = variant === 'cwd_alias' ? physicalRoot : alias;
+      const result = await initializeRepository({ cwd }, { git: git(boundary) });
+      expect(result.root).toBe(
+        variant === 'same_alias'
+          ? join(alias, 'bound-subfolder')
+          : realpathSync.native(physicalBound),
+      );
+      expect(result.mode).toBe('existing');
+      expect(result.binding.sessionId).toBe(sessionId);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
+      expect(readFileSync(join(stored.folder, 'config.json'), 'utf8')).toBe(stored.config);
+      expect(readFileSync(join(stored.folder, 'outbox.sqlite'))).toEqual(stored.outbox);
+      expect(existsSync(join(physicalRoot, '.memvora'))).toBe(false);
+    },
+  );
+
+  it('creates a new binding only within the proven physical Git boundary when cwd uses an alias', async () => {
+    const parent = fixtureDirectory();
+    const physicalRoot = join(parent, 'physical-repository');
+    mkdirSync(join(physicalRoot, 'deep'), { recursive: true });
+    const alias = join(parent, 'repository-alias');
+    symlinkSync(physicalRoot, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const unrelated = storedBinding(parent);
+    const fetcher = transport();
+    const result = await initializeRepository(
+      { cwd: join(alias, 'deep'), repositoryId },
+      { git: git(physicalRoot) },
+    );
+    expect(result.root).toBe(realpathSync.native(physicalRoot));
+    expect(result.mode).toBe('created');
+    expect(JSON.parse(readFileSync(join(physicalRoot, '.memvora', 'config.json'), 'utf8'))).toEqual(
+      result.binding,
+    );
+    expect(existsSync(join(physicalRoot, 'deep', '.memvora'))).toBe(false);
+    expect(readFileSync(join(unrelated.folder, 'config.json'), 'utf8')).toBe(unrelated.config);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  });
+
+  it.each(['sibling', 'linked_escape'] as const)(
+    'rejects a physically outside cwd before requests or writes (%s)',
+    async (variant) => {
+      const parent = fixtureDirectory();
+      const physicalRoot = join(parent, 'physical-repository');
+      const foreign = join(parent, 'foreign-repository');
+      mkdirSync(physicalRoot);
+      mkdirSync(join(foreign, 'deep'), { recursive: true });
+      const stored = storedBinding(foreign);
+      let cwd = join(foreign, 'deep');
+      if (variant === 'linked_escape') {
+        const alias = join(physicalRoot, 'outside-link');
+        symlinkSync(foreign, alias, process.platform === 'win32' ? 'junction' : 'dir');
+        cwd = join(alias, 'deep');
+      }
+      const fetcher = transport();
+      await expect(
+        initializeRepository({ cwd, repositoryId }, { git: git(physicalRoot) }),
+      ).rejects.toThrow('repository root outside');
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(existsSync(join(physicalRoot, '.memvora'))).toBe(false);
+      expect(existsSync(join(foreign, 'deep', '.memvora'))).toBe(false);
+      expect(readFileSync(join(stored.folder, 'config.json'), 'utf8')).toBe(stored.config);
+      expect(readFileSync(join(stored.folder, 'outbox.sqlite'))).toEqual(stored.outbox);
+    },
+  );
+
+  it('fails safely before requests or writes when a reported Git path cannot be canonicalized', async () => {
+    const root = fixtureDirectory();
+    const fetcher = transport();
+    const secretPath = join(root, 'PrivateMissingGitPathFixture');
+    const failure = await initializeRepository(
+      { cwd: root, repositoryId },
+      { git: git(secretPath) },
+    ).catch((error: Error) => error);
+    expect(String(failure)).toContain('Git repository paths could not be verified');
+    expect(String(failure)).not.toContain('PrivateMissingGitPathFixture');
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(existsSync(join(root, '.memvora'))).toBe(false);
   });
 
   it('validates UUIDs before requests and rejects mismatched flags/origins or corrupt configs without changes', async () => {

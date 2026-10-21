@@ -105,3 +105,5 @@ Opt in to durable offline retention with `session note [id] --text ... --queue` 
 `ask` prints the API's evidence label, recalled steps, source IDs and uncertainty. Journal claims remain explicitly user-authored; recorded exits remain observations. It does not invent an AI summary or run a recommended fix. Child failure status is preserved where representable. This local CLI is private and has not been published as an npm package.
 
 Version 0.8.0 pins both successful diff snapshots to the validated pre-command commit and records that full baseline on each phase. Final events separately record after-command HEAD, including unavailable probes. If starting HEAD cannot be read, the command still runs but neither diff is attempted. Legacy baselines remain unknown. See [fixed Git snapshot semantics](../../docs/GIT_SNAPSHOTS.md).
+
+Initialization verifies the physical Git boundary before looking for a binding. Windows short/long path aliases and directory links use their canonical ancestry when needed, while unrelated or physically outside directories are rejected before API requests or configuration writes. Consistent existing lexical binding paths are preserved.
