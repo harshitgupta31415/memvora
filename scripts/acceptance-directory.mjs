@@ -324,6 +324,18 @@ try {
   assert.ok(
     tools.tools.some((tool) => tool.name === 'find_sessions' && tool.annotations?.readOnlyHint),
   );
+  const beforeRejectedToolFilters = directoryRequests;
+  for (const invalid of [
+    { repository: archive.id },
+    { repositoryIds: [archive.id] },
+    { repositoryId: archive.id, includeEverything: true },
+  ])
+    await tool(invalid, true);
+  assert.equal(
+    directoryRequests,
+    beforeRejectedToolFilters,
+    'Unknown MCP filters reached the API.',
+  );
 
   const input = {
     query: 'DirectoryAcceptanceNeedle',
@@ -526,6 +538,7 @@ try {
       'compiled_web_filter_form_and_live_paging',
       'compiled_cli_pages',
       'actual_read_only_stdio_mcp',
+      'unknown_mcp_filters_rejected_before_api',
       'changed_cursor_scope_rejected',
       'malformed_url_recovery',
       'inert_hostile_title',

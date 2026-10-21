@@ -86,6 +86,8 @@ All 230 tests in 41 files, strict types, lint, formatting and the optimized rele
 
 The rebuilt main application was verified through live API, compiled CLI and actual MCP pages against its two existing investigations, without adding sessions or evidence. Desktop and 390-pixel browser checks passed for older results, form submission resetting the cursor, repository/status filters and reset-all behavior. Matching totals and page membership agreed across clients. All six events, six memories, six imported sources and the single authored note remain intact; schema remains 7. Ignored `.memvora/directory-live-checkpoint.json` and `directory-ui-checkpoint.json` record this verification. The website renders malformed filter links as a truthful recovery view; API errors retain their HTTP error status.
 
+An additional actual-transport regression caught unknown MCP fields being stripped before validation: a mistyped `repository` selector could become an unfiltered request. `find_sessions` now uses a strict tool-input schema. Mistyped repository fields and unknown options return an error with no API lookup or results; the compiled directory acceptance verifies that boundary explicitly.
+
 ## Running and continuing
 
 The compiled web and API can run with:

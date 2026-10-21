@@ -68,13 +68,15 @@ serveStdio(() => {
     {
       description:
         'Find authorized investigations by literal title, optional repository and open/closed filters. Returns one complete live page ordered by newest creation time with nextCursor; this searches titles, not command/error/note/code content. Follow the cursor with unchanged filters to find older investigations; page size may change. Does not run commands or change a session.',
-      inputSchema: z.object({
-        query: z.string().max(200).optional(),
-        repositoryId: z.string().uuid().optional(),
-        status: z.enum(['open', 'closed']).optional(),
-        limit: z.number().int().min(1).max(10).optional(),
-        cursor: z.string().min(1).max(2048).optional(),
-      }),
+      inputSchema: z
+        .object({
+          query: z.string().max(200).optional(),
+          repositoryId: z.string().uuid().optional(),
+          status: z.enum(['open', 'closed']).optional(),
+          limit: z.number().int().min(1).max(10).optional(),
+          cursor: z.string().min(1).max(2048).optional(),
+        })
+        .strict(),
       annotations,
     },
     async ({ query, repositoryId, status, limit, cursor }) =>
