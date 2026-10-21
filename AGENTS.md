@@ -13,6 +13,12 @@ Memvora preserves engineering evidence so a developer or assistant can recover h
 
 Use the developer's existing Git author and GitHub identity. The GitHub username is `harshitgupta31415`; new branches should use `harshitgupta31415/<descriptive-name>` unless the user requests another name. Do not add assistant attribution, AI co-author trailers, or model-provider identity to project names, commits, pull requests, documentation, or UI. Preserve genuine vendor integrations when functionally required.
 
+## Pull requests and merging
+
+The user requires pull requests for project changes and authorizes creating and merging them without asking again. Keep the repository private. Use `main` as the integration branch and `harshitgupta31415/<descriptive-name>` for feature branches; do not push feature changes directly to `main`.
+
+Before merging, inspect the complete diff, run the checks appropriate to the change, and wait for every required CI job on the latest PR revision. Describe the resulting behavior, validation and material limits in the PR. Merge only the reviewed head commit after checks pass; do not bypass failed checks, repository protections or unresolved material findings. Then synchronize the local `main` branch without overwriting uncommitted work. Report the PR link and merge result. If GitHub permissions or a failing prerequisite block the merge, state the actual blocker rather than silently using direct pushes.
+
 ## Implementing a change
 
 1. Inspect the relevant code, workspace scripts, installed dependency versions, and existing patterns. Check official documentation for unfamiliar or version-sensitive APIs; avoid guessing from older examples.
