@@ -1,10 +1,19 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Check } from 'typebox/value';
 import type Type from 'typebox';
+import { resolveClientCredential } from '@memvora/core';
 
-const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+function credential() {
+  const token = process.env['MEMVORA_LOCAL_TOKEN'];
+  return token !== undefined
+    ? resolveClientCredential({ token })
+    : resolveClientCredential({
+        dataDirectory: process.env['MEMVORA_DATA_DIR'],
+        sourceDataDirectory: () =>
+          resolve(dirname(fileURLToPath(import.meta.url)), '../../../.memvora'),
+      });
+}
 
 export async function request<T>(path: string, schema: Type.TSchema, body?: unknown): Promise<T> {
   const origin = new URL(process.env['MEMVORA_API_URL'] ?? 'http://127.0.0.1:4000');
@@ -17,11 +26,7 @@ export async function request<T>(path: string, schema: Type.TSchema, body?: unkn
     origin.hash
   )
     throw new Error('Local mode only sends credentials to a plain loopback API origin.');
-  const dataDir = resolve(process.env['MEMVORA_DATA_DIR'] ?? join(projectRoot, '.memvora'));
-  const token =
-    process.env['MEMVORA_LOCAL_TOKEN'] ?? readFileSync(join(dataDir, 'local-token'), 'utf8').trim();
-  if (token.length < 32)
-    throw new Error('Local API credential missing. Start the local API first.');
+  const { token } = credential();
   const response = await fetch(new URL(path, origin), {
     redirect: 'error',
     method: body === undefined ? 'GET' : 'POST',

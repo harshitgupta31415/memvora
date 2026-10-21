@@ -14,6 +14,8 @@ Investigation discovery applies title, repository and open/closed filters on the
 
 The local [setup guide](http://127.0.0.1:3000/setup) generates PowerShell commands for capturing another repository and a read-only MCP configuration using this installation's absolute paths. Repeating `init` verifies an existing binding without replacing its investigation or local outbox. A different repository/API selector requires deliberate separate setup; initialization never silently rebinds stored captures.
 
+CLI and MCP version 0.4.0 are also available together as a private local npm tarball. [CLIENT_INSTALLATION.md](docs/CLIENT_INSTALLATION.md) covers offline installation outside this checkout, explicit server credentials, upgrades and removal. The website/API remain separate; installation does not add remote authentication.
+
 The [backup guide](http://127.0.0.1:3000/backups) provides a manual local operator workflow for complete SQLite snapshots and read-only verification. It preserves stored history and deletion state while keeping the external token, environment files and unsynced CLI outboxes separate. Live database replacement remains a separate recovery workflow.
 
 ## Start locally
@@ -94,6 +96,8 @@ Run resource-intensive commands through `scripts/with-resource-limits.ps1`, as i
 | `npm run cli -- ask <question>`                                           | Retrieve cited evidence for the bound repository.                                                                |
 | `npm run cli -- session export <id> --format markdown --output report.md` | Export one bounded investigation into a new file; existing files are never overwritten.                          |
 | `npm run mcp`                                                             | Start the built stdio adapter. Use direct Node in an MCP host to keep stdout clean.                              |
+| `npm run package:clients`                                                 | Build a private CLI/MCP tarball and audit its exact file inventory; no registry publication.                     |
+| `npm run acceptance:clients`                                              | Install that artifact offline in an isolated folder and verify real capture, retry, Ask and MCP.                 |
 | `npm run worker:check`                                                    | Check local worker configuration syntax; it does not consume jobs.                                               |
 | `npm run acceptance:local`                                                | With the API running and services built, capture two labeled real error/fix fixtures and verify recall plus MCP. |
 

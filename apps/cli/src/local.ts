@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { Check } from 'typebox/value';
+import { resolveClientCredential, resolveClientDataDirectory } from '@memvora/core';
 import {
   EventAckSchema,
   IdSchema,
@@ -89,21 +90,31 @@ function parseStoredPayload(text: string): Record<string, unknown> {
   }
 }
 
-export const sourceProjectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+function sourceDataDirectory(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), '../../../.memvora');
+}
 
 export function serverDataDir(override?: string): string {
-  return resolve(
-    override ?? process.env['MEMVORA_DATA_DIR'] ?? join(sourceProjectRoot, '.memvora'),
-  );
+  return resolveClientDataDirectory({
+    home: override,
+    dataDirectory: process.env['MEMVORA_DATA_DIR'],
+    sourceDataDirectory,
+  });
+}
+
+export function readCredential(home?: string) {
+  const token = process.env['MEMVORA_LOCAL_TOKEN'];
+  return token !== undefined
+    ? resolveClientCredential({ token })
+    : resolveClientCredential({
+        home,
+        dataDirectory: process.env['MEMVORA_DATA_DIR'],
+        sourceDataDirectory,
+      });
 }
 
 export function readToken(home?: string): string {
-  const token =
-    process.env['MEMVORA_LOCAL_TOKEN'] ??
-    readFileSync(join(serverDataDir(home), 'local-token'), 'utf8').trim();
-  if (token.length < 32)
-    throw new Error('Local API credential is missing or invalid. Start the local API first.');
-  return token;
+  return readCredential(home).token;
 }
 
 export function findBindingDirectory(cwd = process.cwd()): string | undefined {
