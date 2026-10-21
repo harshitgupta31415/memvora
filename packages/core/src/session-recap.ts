@@ -34,21 +34,25 @@ function outcome(event: CapturedEvent): string {
 }
 
 function diffSummary(event: CapturedEvent): string {
-  if (!event.diffs.length) return 'No diff snapshots were captured.';
+  if (!event.diffs.length)
+    return event.git.error
+      ? 'Git probing failed; no diff snapshots were captured.'
+      : 'No diff snapshots were captured.';
   const before = event.diffs.find((diff) => diff.phase === 'before');
   const after = event.diffs.find((diff) => diff.phase === 'after');
+  const truncated = event.diffs.some((diff) => diff.truncatedBytes > 0);
   const parts = event.diffs.map(
     (diff) =>
-      `${diff.phase === 'before' ? 'Before' : 'After'} snapshot: ${diff.text ? 'nonempty' : 'empty'}`,
+      `${diff.phase === 'before' ? 'Before' : 'After'} HEAD-relative snapshot: ${diff.text ? 'nonempty' : 'empty'}`,
   );
-  if (before && after)
+  if (before && after && !event.git.error && !truncated)
     parts.push(
       before.text === after.text
         ? 'Snapshot texts match'
         : 'Snapshot texts differ; inspect the event for details',
     );
-  if (event.diffs.some((diff) => diff.truncatedBytes > 0))
-    parts.push('Snapshot text was truncated');
+  if (event.git.error) parts.push('Git probing failed; snapshot comparison unavailable');
+  if (truncated) parts.push('Snapshot text was truncated; full comparison unavailable');
   return `${parts.join('. ')}.`;
 }
 
@@ -116,7 +120,7 @@ export function deriveSessionRecap(evidence: SessionRecapEvidence): SessionRecap
   const uncertainty = [
     'Commands and outcomes are observations. Engineer intent, root cause and a causal fix are not established by this recap.',
     'A zero exit code records a successful command exit; it does not by itself prove that the underlying issue is resolved.',
-    'Commands and output are shortened excerpts. Diff snapshots may include pre-existing changes. Open each event for the original stored evidence.',
+    'Commands and output are shortened excerpts. Git snapshots are relative to HEAD and may include pre-existing changes; they do not isolate changes made by a command. Open each event for the original stored evidence.',
   ];
   if (omittedEvents)
     uncertainty.push(
@@ -124,7 +128,7 @@ export function deriveSessionRecap(evidence: SessionRecapEvidence): SessionRecap
     );
   if (counts.incompleteCapture)
     uncertainty.push(
-      `${counts.incompleteCapture} included attempts have incomplete or truncated output capture.`,
+      `${counts.incompleteCapture} included attempts have incomplete or truncated evidence capture.`,
     );
   if (
     events.some((event) => event.git.error || event.diffs.some((diff) => diff.truncatedBytes > 0))

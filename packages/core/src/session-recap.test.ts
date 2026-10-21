@@ -121,9 +121,75 @@ describe('observed investigation recap', () => {
     expect(JSON.stringify(recap)).not.toContain('plain-secret');
     expect(recap.steps[0]!.outputExcerpt).not.toContain('\u0085');
     expect(recap.steps[0]!.outputExcerpt).not.toContain('\u001b');
-    expect(recap.steps[0]!.diffSummary).toContain('Snapshot texts differ');
+    expect(recap.steps[0]!.diffSummary).toContain('Snapshot text was truncated');
+    expect(recap.steps[0]!.diffSummary).not.toContain('Snapshot texts differ');
     expect(recap.counts).toMatchObject({ withDiffs: 1, incompleteCapture: 1 });
     expect(recap.uncertainty.join(' ')).toContain('pre-existing changes');
+    expect(Check(SessionRecapSchema, recap)).toBe(true);
+  });
+
+  it('does not treat failed Git probes or matching truncated prefixes as an unchanged snapshot', () => {
+    const { session, event } = fixture();
+    const unavailable = event(1);
+    unavailable.git.error = 'before diff probe failed; after diff probe failed';
+    unavailable.capture.complete = false;
+    // Older captures can retain empty placeholders even when Git failed.
+    unavailable.diffs = [
+      { phase: 'before', text: '', truncatedBytes: 0 },
+      { phase: 'after', text: '', truncatedBytes: 0 },
+    ];
+    const truncated = event(2);
+    truncated.capture.complete = false;
+    truncated.diffs = [
+      { phase: 'before', text: 'matching retained prefix', truncatedBytes: 100 },
+      { phase: 'after', text: 'matching retained prefix', truncatedBytes: 200 },
+    ];
+    const missing = event(3);
+    missing.git.error = 'repository probe failed';
+    missing.capture.complete = false;
+
+    const recap = deriveSessionRecap({
+      session,
+      events: [unavailable, truncated, missing],
+      totalEventCount: 3,
+    });
+    expect(recap.steps[0]!.diffSummary).toContain('Git probing failed');
+    expect(recap.steps[0]!.diffSummary).toContain('comparison unavailable');
+    expect(recap.steps[1]!.diffSummary).toContain('truncated');
+    expect(recap.steps[1]!.diffSummary).toContain('comparison unavailable');
+    expect(recap.steps[2]!.diffSummary).toContain('Git probing failed; no diff snapshots');
+    expect(recap.steps.every((step) => !step.diffSummary.includes('Snapshot texts match'))).toBe(
+      true,
+    );
+    expect(recap.counts).toMatchObject({ passed: 3, incompleteCapture: 3, withDiffs: 1 });
+    expect(recap.uncertainty.join(' ')).toContain('incomplete or truncated evidence capture');
+    expect(Check(SessionRecapSchema, recap)).toBe(true);
+  });
+
+  it('keeps complete snapshot text comparisons distinct from per-command change attribution', () => {
+    const { session, event } = fixture();
+    const unchanged = event(1);
+    unchanged.diffs = [
+      { phase: 'before', text: '', truncatedBytes: 0 },
+      { phase: 'after', text: '', truncatedBytes: 0 },
+    ];
+    const different = event(2);
+    different.diffs = [
+      { phase: 'before', text: 'pre-existing change', truncatedBytes: 0 },
+      { phase: 'after', text: 'another retained snapshot', truncatedBytes: 0 },
+    ];
+    const recap = deriveSessionRecap({
+      session,
+      events: [unchanged, different],
+      totalEventCount: 2,
+    });
+    expect(recap.steps[0]!.diffSummary).toContain('Snapshot texts match');
+    expect(recap.steps[1]!.diffSummary).toContain('Snapshot texts differ');
+    expect(recap.steps.every((step) => step.diffSummary.includes('HEAD-relative snapshot'))).toBe(
+      true,
+    );
+    expect(recap.uncertainty.join(' ')).toContain('do not isolate changes made by a command');
+    expect(recap.uncertainty.join(' ')).toContain('causal fix are not established');
     expect(Check(SessionRecapSchema, recap)).toBe(true);
   });
 

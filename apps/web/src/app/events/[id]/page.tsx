@@ -16,6 +16,15 @@ export default async function EventDetail({ params }: { params: Promise<{ id: st
     return <ErrorState message={result.message} />;
   }
   const { event } = result.data;
+  const gitContextUnavailable = Boolean(event.git.error) || !event.git.commitSha;
+  const workingTree = event.git.dirty
+    ? 'Uncommitted changes'
+    : gitContextUnavailable
+      ? 'Unknown (Git context unavailable)'
+      : 'Clean when observed';
+  const missingDiffPhases = ['before', 'after'].filter(
+    (phase) => !event.diffs.some((diff) => diff.phase === phase),
+  );
   const duration = Math.max(
     0,
     new Date(event.endedAt).getTime() - new Date(event.startedAt).getTime(),
@@ -46,8 +55,10 @@ export default async function EventDetail({ params }: { params: Promise<{ id: st
           <div>
             <strong>This capture is {event.capture.complete ? 'truncated' : 'incomplete'}.</strong>
             <p>
-              {event.capture.truncatedBytes.toLocaleString()} bytes were not retained. Missing
-              evidence must not be treated as a successful outcome.
+              {event.capture.truncatedBytes > 0
+                ? `${event.capture.truncatedBytes.toLocaleString()} bytes were not retained.`
+                : 'Some capture details were unavailable.'}{' '}
+              Missing evidence must not be treated as a successful outcome.
             </p>
           </div>
         </div>
@@ -102,6 +113,14 @@ export default async function EventDetail({ params }: { params: Promise<{ id: st
               </pre>
             </div>
           </section>
+          {missingDiffPhases.length > 0 && (
+            <p className="muted-caption">
+              {missingDiffPhases.length === 2
+                ? 'Before and after diffs were not captured.'
+                : `The ${missingDiffPhases[0]} diff was not captured.`}{' '}
+              Missing diffs do not establish that files were unchanged.
+            </p>
+          )}
           {event.diffs.map((diff) => (
             <section key={diff.phase}>
               <SectionHeading
@@ -118,7 +137,9 @@ export default async function EventDetail({ params }: { params: Promise<{ id: st
                   </span>
                 </div>
                 <pre className="output-block">
-                  {diff.text || <span className="output-empty">No tracked diff was recorded.</span>}
+                  {diff.text || (
+                    <span className="output-empty">No tracked diff text was retained.</span>
+                  )}
                 </pre>
               </div>
             </section>
@@ -164,7 +185,7 @@ export default async function EventDetail({ params }: { params: Promise<{ id: st
               </li>
               <li>
                 <span>Working tree</span>
-                <span>{event.git.dirty ? 'Uncommitted changes' : 'Clean when observed'}</span>
+                <span>{workingTree}</span>
               </li>
               <li>
                 <span>Redaction</span>
