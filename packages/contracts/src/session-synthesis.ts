@@ -114,6 +114,36 @@ export const SessionSynthesisRequestSchema = object({
   analysis: Type.Union([SessionSynthesisAnalysisSchema, Type.Null()]),
 });
 export type SessionSynthesisRequest = Type.Static<typeof SessionSynthesisRequestSchema>;
+const requestFields = SessionSynthesisRequestSchema.properties;
+/** Discovery metadata deliberately excludes submitted evidence, result text and citations. */
+export const SessionSynthesisMetadataSchema = object({
+  id: requestFields.id,
+  sessionId: requestFields.sessionId,
+  repositoryId: requestFields.repositoryId,
+  status: requestFields.status,
+  attempts: requestFields.attempts,
+  createdAt: requestFields.createdAt,
+  startedAt: requestFields.startedAt,
+  finishedAt: requestFields.finishedAt,
+  inputHash: requestFields.inputHash,
+  configuration: requestFields.configuration,
+  coverage: requestFields.coverage,
+  stale: requestFields.stale,
+  failureCode: requestFields.failureCode,
+});
+export type SessionSynthesisMetadata = Type.Static<typeof SessionSynthesisMetadataSchema>;
+export const SessionSynthesisHistorySchema = object({
+  sessionId: IdSchema,
+  repositoryId: IdSchema,
+  configuration: Type.Union([SessionSynthesisConfigurationSchema, Type.Null()]),
+  items: Type.Array(SessionSynthesisMetadataSchema, { maxItems: 32 }),
+  retainedCount: Type.Integer({ minimum: 0, maximum: 32 }),
+  requestLimit: Type.Literal(32),
+  order: Type.Literal('newest_requested_first'),
+  analysisIncluded: Type.Literal(false),
+  sourcesIncluded: Type.Literal(false),
+});
+export type SessionSynthesisHistory = Type.Static<typeof SessionSynthesisHistorySchema>;
 export const SessionSynthesisPreviewSchema = object({
   sessionId: IdSchema,
   repositoryId: IdSchema,

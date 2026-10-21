@@ -4,11 +4,14 @@ import { Check } from 'typebox/value';
 import {
   SessionSynthesisAnalysisSchema,
   SessionSynthesisConfigurationSchema,
+  SessionSynthesisHistorySchema,
   SessionSynthesisInputSchema,
   SessionSynthesisPreviewSchema,
   SessionSynthesisResponseSchema,
   type SessionSynthesisAnalysis,
   type SessionSynthesisConfiguration,
+  type SessionSynthesisHistory,
+  type SessionSynthesisMetadata,
   type SessionSynthesisInput,
   type SessionSynthesisPreview,
   type SessionSynthesisResponse,
@@ -22,6 +25,7 @@ import type { SessionSynthesizer, SessionSynthesisStore } from './session-synthe
 export const sessionSynthesisPromptVersion = 'session-analysis-v1' as const;
 export const sessionSynthesisInputByteLimit = 65_536;
 export const sessionSynthesisAnalysisByteLimit = 24_576;
+export const sessionSynthesisHistoryByteLimit = 65_536;
 
 function invalid(): never {
   throw new DomainError(
@@ -52,6 +56,79 @@ function coverageValid(value: SessionSynthesisInput['coverage']): boolean {
     value.totalEvents === value.includedEvents + value.omittedEvents &&
     value.totalNotes === value.includedNotes + value.omittedNotes
   );
+}
+function metadataValid(
+  request: SessionSynthesisMetadata,
+  configuration: SessionSynthesisConfiguration | null,
+): boolean {
+  if (!coverageValid(request.coverage)) return false;
+  if (
+    (!configuration ||
+      configuration.fingerprint !== request.configuration.fingerprint ||
+      configuration.provider !== request.configuration.provider ||
+      configuration.model !== request.configuration.model ||
+      configuration.promptVersion !== request.configuration.promptVersion) &&
+    !request.stale
+  )
+    return false;
+  switch (request.status) {
+    case 'queued':
+      return (
+        request.attempts === 0 &&
+        request.startedAt === null &&
+        request.finishedAt === null &&
+        request.failureCode === null
+      );
+    case 'running':
+      return (
+        request.attempts === 1 &&
+        request.startedAt !== null &&
+        request.finishedAt === null &&
+        request.failureCode === null
+      );
+    case 'ready':
+      return (
+        request.attempts === 1 &&
+        request.startedAt !== null &&
+        request.finishedAt !== null &&
+        request.failureCode === null
+      );
+    case 'failed':
+      return (
+        request.attempts === 1 &&
+        request.startedAt !== null &&
+        request.finishedAt !== null &&
+        ['PROVIDER_FAILED', 'INTERRUPTED'].includes(request.failureCode ?? '')
+      );
+    case 'superseded':
+      return (
+        request.finishedAt !== null &&
+        (request.attempts === 0) === (request.startedAt === null) &&
+        ['INPUT_CHANGED', 'CONFIGURATION_CHANGED'].includes(request.failureCode ?? '')
+      );
+  }
+}
+
+/** A bounded metadata read; full evidence and saved interpretation require a separate detail read. */
+export function validateSessionSynthesisHistory(
+  value: unknown,
+  sessionId: string,
+): SessionSynthesisHistory {
+  if (
+    !Check(SessionSynthesisHistorySchema, value) ||
+    value.sessionId !== sessionId ||
+    value.retainedCount !== value.items.length ||
+    new Set(value.items.map((item) => item.id)).size !== value.items.length ||
+    bytes(value) > sessionSynthesisHistoryByteLimit ||
+    value.items.some(
+      (item) =>
+        item.sessionId !== sessionId ||
+        item.repositoryId !== value.repositoryId ||
+        !metadataValid(item, value.configuration),
+    )
+  )
+    invalid();
+  return value;
 }
 export function buildSessionSynthesisInput(evidence: SessionHandoverEvidence): {
   input: SessionSynthesisInput;
@@ -274,7 +351,7 @@ export function validateSessionSynthesisResponse(
   if (
     request.sessionId !== sessionId ||
     (requestId !== undefined && request.id !== requestId) ||
-    !coverageValid(request.coverage)
+    !metadataValid(request, value.configuration)
   )
     invalid();
   const sources = new Map(request.sources.map((source) => [source.id, source]));
@@ -295,22 +372,8 @@ export function validateSessionSynthesisResponse(
     )
       invalid();
   }
-  if (
-    (!value.configuration ||
-      value.configuration.fingerprint !== request.configuration.fingerprint) &&
-    !request.stale
-  )
-    invalid();
   if (request.status === 'ready') {
-    if (
-      !request.analysis ||
-      request.attempts !== 1 ||
-      request.startedAt === null ||
-      request.finishedAt === null ||
-      request.failureCode !== null ||
-      bytes(request.analysis) > sessionSynthesisAnalysisByteLimit
-    )
-      invalid();
+    if (!request.analysis || bytes(request.analysis) > sessionSynthesisAnalysisByteLimit) invalid();
     const claims = [
       request.analysis.overview,
       ...request.analysis.hypotheses,
@@ -327,40 +390,6 @@ export function validateSessionSynthesisResponse(
       invalid();
   } else {
     if (request.analysis !== null) invalid();
-    if (
-      request.status === 'queued' &&
-      (request.attempts !== 0 ||
-        request.startedAt !== null ||
-        request.finishedAt !== null ||
-        request.failureCode !== null)
-    )
-      invalid();
-    if (
-      request.status === 'running' &&
-      (request.attempts !== 1 ||
-        request.startedAt === null ||
-        request.finishedAt !== null ||
-        request.failureCode !== null)
-    )
-      invalid();
-    if (
-      (request.status === 'failed' || request.status === 'superseded') &&
-      (request.finishedAt === null || request.failureCode === null)
-    )
-      invalid();
-    if (
-      request.status === 'failed' &&
-      (request.attempts !== 1 ||
-        request.startedAt === null ||
-        !['PROVIDER_FAILED', 'INTERRUPTED'].includes(request.failureCode!))
-    )
-      invalid();
-    if (
-      request.status === 'superseded' &&
-      ((request.attempts === 0) !== (request.startedAt === null) ||
-        !['INPUT_CHANGED', 'CONFIGURATION_CHANGED'].includes(request.failureCode!))
-    )
-      invalid();
   }
   return value;
 }

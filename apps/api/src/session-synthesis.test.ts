@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Check } from 'typebox/value';
-import { SessionSynthesisPreviewSchema, SessionSynthesisResponseSchema } from '@memvora/contracts';
+import {
+  SessionSynthesisHistorySchema,
+  SessionSynthesisPreviewSchema,
+  SessionSynthesisResponseSchema,
+} from '@memvora/contracts';
 import type {
   CapturedEvent,
+  SessionSynthesisHistory,
   SessionSynthesisAnalysis,
   SessionSynthesisInput,
   SessionSynthesisPreview,
@@ -129,6 +134,126 @@ function fixture({
 }
 
 describe('explicit local session synthesis HTTP lifecycle', () => {
+  it('authenticates metadata history and rejects queries and malformed session selectors without writes', async () => {
+    const f = fixture();
+    const path = `${f.path}/history`;
+    const before = f.store.database.prepare('SELECT total_changes() AS count').get()!.count;
+    expect((await f.app.inject({ method: 'GET', url: path })).statusCode).toBe(401);
+    expect(
+      (
+        await f.app.inject({
+          method: 'GET',
+          url: path,
+          headers: { ...headers, host: 'untrusted.example' },
+        })
+      ).statusCode,
+    ).toBe(403);
+    for (const suffix of ['?limit=1', `?requestId=${randomUUID()}`, '?unknown=1'])
+      expect(
+        (await f.app.inject({ method: 'GET', url: `${path}${suffix}`, headers })).statusCode,
+      ).toBe(400);
+    for (const id of ['not-a-uuid', randomUUID()])
+      expect(
+        (
+          await f.app.inject({
+            method: 'GET',
+            url: `/v1/sessions/${id}/synthesis/history`,
+            headers,
+          })
+        ).statusCode,
+      ).toBe(id === 'not-a-uuid' ? 400 : 404);
+    const response = await f.app.inject({ method: 'GET', url: path, headers });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.json()).toMatchObject({
+      sessionId: f.session.id,
+      repositoryId: f.repository.id,
+      items: [],
+      retainedCount: 0,
+      requestLimit: 32,
+      analysisIncluded: false,
+      sourcesIncluded: false,
+    });
+    expect(f.store.database.prepare('SELECT total_changes() AS count').get()!.count).toBe(before);
+    expect(f.synthesize).not.toHaveBeenCalled();
+  });
+
+  it('discovers earlier ready versions after a later failure without exposing analysis or source payloads', async () => {
+    const f = fixture();
+    const preview = await f.preview();
+    const requestIds: string[] = [];
+    for (let index = 0; index < 3; index++) {
+      const requestId = randomUUID();
+      requestIds.push(requestId);
+      expect(
+        (await f.request({ requestId, expectedInputHash: preview.inputHash })).statusCode,
+      ).toBe(202);
+      if (index < 2) expect(await runSessionSynthesisOnce(f.store, f.synthesis)).toBe(true);
+      else {
+        const job = f.store.claimSessionSynthesis(configuration);
+        expect(job).not.toBeNull();
+        f.store.failSessionSynthesis(job!);
+      }
+    }
+    const before = f.store.database.prepare('SELECT total_changes() AS count').get()!.count;
+    const response = await f.app.inject({ method: 'GET', url: `${f.path}/history`, headers });
+    expect(response.statusCode).toBe(200);
+    const history = response.json<SessionSynthesisHistory>();
+    expect(Check(SessionSynthesisHistorySchema, history)).toBe(true);
+    expect(history.items.map((item) => item.id)).toEqual([...requestIds].reverse());
+    expect(history.items.map((item) => item.status)).toEqual(['failed', 'ready', 'ready']);
+    expect(history.retainedCount).toBe(3);
+    expect(history.order).toBe('newest_requested_first');
+    for (const item of history.items) {
+      const detail = (await f.status(item.id)).request!;
+      const { analysis: _analysis, sources: _sources, ...metadata } = detail;
+      expect(item).toEqual(metadata);
+      expect(item).not.toHaveProperty('analysis');
+      expect(item).not.toHaveProperty('sources');
+      expect(item).not.toHaveProperty('input');
+    }
+    expect(response.body).not.toContain('Synthetic interpretation of the recorded attempts');
+    expect((await f.status(requestIds[0])).request?.status).toBe('ready');
+    expect(f.store.database.prepare('SELECT total_changes() AS count').get()!.count).toBe(before);
+    expect(f.synthesize).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps retained history readable when synthesis is disabled and denies unavailable repository scope', async () => {
+    const f = fixture({ configured: false });
+    const context = f.service.context();
+    const preview = f.store.getSessionSynthesisPreview(context, f.session.id, configuration);
+    const saved = f.store.requestSessionSynthesis(
+      context,
+      f.session.id,
+      { requestId: randomUUID(), expectedInputHash: preview.inputHash! },
+      configuration,
+    );
+    const other = f.store.createSession(context, { repositoryId: f.repository.id });
+    const before = f.store.database.prepare('SELECT total_changes() AS count').get()!.count;
+    const result = await f.app.inject({ method: 'GET', url: `${f.path}/history`, headers });
+    expect(result.statusCode).toBe(200);
+    const history = result.json<SessionSynthesisHistory>();
+    expect(Check(SessionSynthesisHistorySchema, history)).toBe(true);
+    expect(history.configuration).toBeNull();
+    expect(history.items).toHaveLength(1);
+    expect(history.items[0]).toMatchObject({ id: saved.request.id, status: 'queued', stale: true });
+    expect(
+      (
+        await f.app.inject({
+          method: 'GET',
+          url: `/v1/sessions/${other.id}/synthesis/history`,
+          headers,
+        })
+      ).json<SessionSynthesisHistory>().items,
+    ).toEqual([]);
+    expect(f.store.database.prepare('SELECT total_changes() AS count').get()!.count).toBe(before);
+    f.store.deleteRepository(context, f.repository.id);
+    expect(
+      (await f.app.inject({ method: 'GET', url: `${f.path}/history`, headers })).statusCode,
+    ).toBe(404);
+    expect(f.synthesize).not.toHaveBeenCalled();
+  });
+
   it('authenticates every route and rejects malformed selectors/extra fields before scheduling', async () => {
     const f = fixture();
     for (const path of [f.path, `${f.path}/preview`]) {

@@ -6,6 +6,7 @@ import {
   SessionEventsPageSchema,
   SessionRecapSchema,
   SessionSynthesisResponseSchema,
+  SessionSynthesisHistorySchema,
   SessionHandoverSchema,
   SessionNoteResponseSchema,
   SessionNotesPageSchema,
@@ -18,6 +19,7 @@ import {
   type SessionEventsPage,
   type SessionRecap,
   type SessionSynthesisResponse,
+  type SessionSynthesisHistory,
   type SessionHandover,
   type SessionNote,
   type SessionNotesPage,
@@ -30,7 +32,10 @@ import * as z from 'zod/v4';
 import { request, toolResult } from './client.js';
 import { buildSessionContextResult } from './session-context.js';
 import { buildSessionRecapResult } from './session-recap.js';
-import { buildSessionSynthesisResult } from './session-synthesis.js';
+import {
+  buildSessionSynthesisHistoryResult,
+  buildSessionSynthesisResult,
+} from './session-synthesis.js';
 import { buildSessionNotesResult, type SessionNoteSearchResult } from './session-notes.js';
 import { buildSessionHandoverPreview } from './session-handover.js';
 import { findSessions } from './session-directory.js';
@@ -294,6 +299,24 @@ serveStdio(() => {
         );
         if (report.session.id !== id) throw new Error('Handover returned an unexpected session.');
         return buildSessionHandoverPreview(report);
+      }),
+  );
+
+  server.registerTool(
+    'get_session_synthesis_history',
+    {
+      description:
+        'Read all retained optional AI interpretation request metadata for one authorized investigation, newest requested first, including status/staleness, original UUID/hash, provider/model and coverage. At most32 complete rows; analysis and source payloads are excluded. Use get_session_synthesis with a requestId to read detail. Never submits work, calls a provider or retries a failed request.',
+      inputSchema: z.object({ id: z.string().uuid() }).strict(),
+      annotations,
+    },
+    async ({ id }) =>
+      toolResult(async () => {
+        const value = await request<SessionSynthesisHistory>(
+          `/v1/sessions/${id}/synthesis/history`,
+          SessionSynthesisHistorySchema,
+        );
+        return buildSessionSynthesisHistoryResult(value, id);
       }),
   );
 

@@ -5,6 +5,7 @@ import type {
   SessionNote,
   SessionSynthesisAnalysis,
   SessionSynthesisConfiguration,
+  SessionSynthesisHistory,
   SessionSynthesisResponse,
 } from '@memvora/contracts';
 import type { SessionHandoverEvidence } from './local-service.js';
@@ -14,6 +15,7 @@ import {
   runSessionSynthesisOnce,
   sessionSynthesisInputHash,
   validateSessionSynthesisAnalysis,
+  validateSessionSynthesisHistory,
   validateSessionSynthesisPreview,
   validateSessionSynthesisResponse,
 } from './session-synthesis.js';
@@ -124,6 +126,24 @@ function ready() {
     },
   };
   return { ...f, input, response };
+}
+function history() {
+  const f = ready();
+  const item = { ...f.response.request! };
+  Reflect.deleteProperty(item, 'analysis');
+  Reflect.deleteProperty(item, 'sources');
+  const value: SessionSynthesisHistory = {
+    sessionId: f.session.id,
+    repositoryId: f.repository.id,
+    configuration,
+    items: [item],
+    retainedCount: 1,
+    requestLimit: 32,
+    order: 'newest_requested_first',
+    analysisIncluded: false,
+    sourcesIncluded: false,
+  };
+  return { ...f, value };
 }
 
 describe('bounded explicit investigation interpretation', () => {
@@ -345,6 +365,7 @@ describe('bounded explicit investigation interpretation', () => {
     const complete = vi.fn(() => true);
     const fail = vi.fn();
     const store: SessionSynthesisStore = {
+      listSessionSyntheses: vi.fn(),
       getSessionSynthesisPreview: vi.fn(),
       requestSessionSynthesis: vi.fn(),
       getSessionSynthesis: vi.fn(),
@@ -367,5 +388,105 @@ describe('bounded explicit investigation interpretation', () => {
       false,
     );
     expect(provider).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('investigation interpretation history metadata boundary', () => {
+  it('preserves server order and all identities without adding result text or citations', () => {
+    const { value, session } = history();
+    const older = {
+      ...value.items[0]!,
+      id: randomUUID(),
+      status: 'failed' as const,
+      failureCode: 'PROVIDER_FAILED' as const,
+    };
+    value.items.push(older);
+    value.retainedCount = 2;
+    const before = JSON.stringify(value);
+    expect(validateSessionSynthesisHistory(value, session.id)).toBe(value);
+    expect(value.items.map((item) => item.id)).toEqual([value.items[0]!.id, older.id]);
+    expect(JSON.stringify(value)).toBe(before);
+    expect(value.items.every((item) => !('analysis' in item) && !('sources' in item))).toBe(true);
+  });
+
+  it('supports empty history and a disabled provider without invalidating retained stale results', () => {
+    const { value, session } = history();
+    value.configuration = null;
+    expect(() => validateSessionSynthesisHistory(value, session.id)).toThrow();
+    value.items[0]!.stale = true;
+    expect(validateSessionSynthesisHistory(value, session.id).items).toHaveLength(1);
+    value.items = [];
+    value.retainedCount = 0;
+    expect(validateSessionSynthesisHistory(value, session.id).retainedCount).toBe(0);
+  });
+
+  it('rejects foreign/duplicate identities, mismatched counts, payload leakage and impossible lifecycle metadata', () => {
+    const { value, session } = history();
+    const mutations = [
+      (page: SessionSynthesisHistory) => {
+        page.sessionId = randomUUID();
+      },
+      (page: SessionSynthesisHistory) => {
+        page.items[0]!.sessionId = randomUUID();
+      },
+      (page: SessionSynthesisHistory) => {
+        page.items[0]!.repositoryId = randomUUID();
+      },
+      (page: SessionSynthesisHistory) => {
+        page.retainedCount = 0;
+      },
+      (page: SessionSynthesisHistory) => {
+        page.items.push({ ...page.items[0]! });
+        page.retainedCount = 2;
+      },
+      (page: SessionSynthesisHistory) => {
+        page.items[0]!.coverage.omittedEvents++;
+      },
+      (page: SessionSynthesisHistory) => {
+        page.items[0]!.attempts = 0;
+      },
+      (page: SessionSynthesisHistory) => {
+        page.items[0]!.status = 'running';
+      },
+      (page: SessionSynthesisHistory) => {
+        Reflect.set(page.items[0]!, 'analysis', { overview: 'private content' });
+      },
+      (page: SessionSynthesisHistory) => {
+        Reflect.set(page.items[0]!, 'sources', []);
+      },
+    ];
+    for (const mutate of mutations) {
+      const copy = structuredClone(value);
+      mutate(copy);
+      expect(() => validateSessionSynthesisHistory(copy, session.id)).toThrow(
+        'authorized evidence',
+      );
+    }
+  });
+
+  it('requires stale disclosure for a changed descriptor even when its fingerprint was incorrectly reused', () => {
+    const { value, session } = history();
+    value.configuration = { ...configuration, model: 'changed-model' };
+    expect(() => validateSessionSynthesisHistory(value, session.id)).toThrow();
+    value.items[0]!.stale = true;
+    expect(validateSessionSynthesisHistory(value, session.id).items[0]!.configuration.model).toBe(
+      'synthetic-model',
+    );
+  });
+
+  it('retains all 32 long-model metadata records within budget and rejects excess membership', () => {
+    const { value, session } = history();
+    value.configuration = { ...configuration, provider: 'x'.repeat(200), model: '界'.repeat(200) };
+    value.items = Array.from({ length: 32 }, () => ({
+      ...value.items[0]!,
+      id: randomUUID(),
+      configuration: value.configuration!,
+    }));
+    value.retainedCount = 32;
+    expect(Buffer.byteLength(JSON.stringify(value), 'utf8')).toBeLessThanOrEqual(65_536);
+    expect(validateSessionSynthesisHistory(value, session.id).items).toHaveLength(32);
+    value.items.push({ ...value.items[0]!, id: randomUUID() });
+    value.retainedCount++;
+    expect(() => validateSessionSynthesisHistory(value, session.id)).toThrow();
   });
 });

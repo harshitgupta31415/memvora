@@ -1046,6 +1046,13 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   ) {
     return this.sessionSyntheses.get(context, sessionId, configuration, requestId);
   }
+  listSessionSyntheses(
+    context: LocalContext,
+    sessionId: string,
+    configuration: SessionSynthesisConfiguration | null,
+  ) {
+    return this.sessionSyntheses.history(context, sessionId, configuration);
+  }
   claimSessionSynthesis(configuration: SessionSynthesisConfiguration | null) {
     return this.sessionSyntheses.claim(configuration);
   }

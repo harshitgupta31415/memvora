@@ -8,6 +8,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { Check } from 'typebox/value';
 import {
+  SessionSynthesisHistorySchema,
   SessionSynthesisInputSchema,
   SessionSynthesisPreviewSchema,
   SessionSynthesisResponseSchema,
@@ -15,6 +16,7 @@ import {
 import {
   LocalMemvora,
   runSessionSynthesisOnce,
+  validateSessionSynthesisHistory,
   validateSessionSynthesisPreview,
   validateSessionSynthesisResponse,
 } from '../packages/core/dist/index.js';
@@ -335,10 +337,12 @@ function startMcp() {
         `${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`,
       );
       const { tools } = await call('tools/list', {});
-      assert.equal(tools.length, 13);
-      const tool = tools.find((item) => item.name === 'get_session_synthesis');
-      assert.ok(tool?.annotations?.readOnlyHint);
-      assert.equal(tool.annotations.destructiveHint, false);
+      assert.equal(tools.length, 14);
+      for (const name of ['get_session_synthesis', 'get_session_synthesis_history']) {
+        const tool = tools.find((item) => item.name === name);
+        assert.ok(tool?.annotations?.readOnlyHint);
+        assert.equal(tool.annotations.destructiveHint, false);
+      }
     },
     async get(input, errorExpected = false) {
       const result = await call('tools/call', { name: 'get_session_synthesis', arguments: input });
@@ -353,6 +357,26 @@ function startMcp() {
       assert.equal(value.readOnly, true);
       assert.ok(value.label.includes('unverified'));
       return value;
+    },
+    async history(input, errorExpected = false) {
+      const result = await call('tools/call', {
+        name: 'get_session_synthesis_history',
+        arguments: input,
+      });
+      safe(result);
+      if (errorExpected) {
+        assert.equal(result.isError, true);
+        return result;
+      }
+      assert.ok(!result.isError, 'Synthesis read-only history tool failed.');
+      assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') <= 96 * 1024);
+      const value = JSON.parse(result.content[0].text);
+      assert.equal(value.readOnly, true);
+      assert.ok(value.label.includes('unverified'));
+      const { readOnly: _readOnly, label: _label, maxBytes, evidenceNotice, ...history } = value;
+      assert.equal(maxBytes, 96 * 1024);
+      assert.equal(typeof evidenceNotice, 'string');
+      return validateSessionSynthesisHistory(history, input.id);
     },
     async close() {
       child.stdin.end();
@@ -575,6 +599,54 @@ try {
   const apiPath = `/v1/sessions/${session.id}/synthesis`;
   const bffPath = `/api/sessions/${session.id}/synthesis`;
   const pagePath = `/sessions/${session.id}/synthesis`;
+  async function history(expectedIds, expectedStatuses, stale = false) {
+    return readOnly(async () => {
+      const value = validateSessionSynthesisHistory(
+        await json(api, `${apiPath}/history`, {
+          authenticated: true,
+          schema: SessionSynthesisHistorySchema,
+        }),
+        session.id,
+      );
+      assert.equal(value.repositoryId, repository.id);
+      assert.equal(value.retainedCount, expectedIds.length);
+      assert.equal(value.requestLimit, 32);
+      assert.equal(value.order, 'newest_requested_first');
+      assert.equal(value.analysisIncluded, false);
+      assert.equal(value.sourcesIncluded, false);
+      assert.deepEqual(
+        value.items.map((item) => item.id),
+        expectedIds,
+      );
+      assert.deepEqual(
+        value.items.map((item) => item.status),
+        expectedStatuses,
+      );
+      for (const item of value.items) {
+        assert.equal(item.stale, stale);
+        assert.ok(!('analysis' in item));
+        assert.ok(!('sources' in item));
+        assert.ok(!('input' in item));
+        const detail = validateSessionSynthesisResponse(
+          await json(api, `${apiPath}?${new URLSearchParams({ requestId: item.id })}`, {
+            authenticated: true,
+            schema: SessionSynthesisResponseSchema,
+          }),
+          session.id,
+          item.id,
+        ).request;
+        const { analysis: _analysis, sources: _sources, ...metadata } = detail;
+        assert.deepEqual(item, metadata, 'History metadata differs from the selected original.');
+      }
+      assert.deepEqual(
+        await json(web, `${bffPath}/history`, { schema: SessionSynthesisHistorySchema }),
+        value,
+      );
+      assert.deepEqual((await cli(['session', 'synthesis-history', session.id])).value, value);
+      assert.deepEqual(await mcp.history({ id: session.id }), value);
+      return value;
+    });
+  }
   stage = 'read-only preview and mutation boundaries';
   const preview = await readOnly(async () => {
     const value = validateSessionSynthesisPreview(
@@ -610,10 +682,16 @@ try {
     await mcp.get({ id: session.id, repositoryId: repository.id }, true);
     assert.equal(apiRequests, before, 'Unknown MCP selector reached the API.');
     await mcp.get({ id: foreignSession.id }, true);
+    const beforeHistory = apiRequests;
+    await mcp.history({ id: session.id, requestId: randomUUID() }, true);
+    assert.equal(apiRequests, beforeHistory, 'Unknown history selector reached the API.');
+    await mcp.history({ id: foreignSession.id }, true);
   });
+  await history([], []);
   const input = { requestId: randomUUID(), expectedInputHash: preview.inputHash };
   await readOnly(async () => {
     await json(api, apiPath, { expected: 401 });
+    await json(api, `${apiPath}/history`, { expected: 401 });
     await json(web, bffPath, { body: input, expected: 403 });
     await json(web, bffPath, {
       body: input,
@@ -626,8 +704,16 @@ try {
       expected: 400,
     });
     await json(web, `${bffPath}/preview?extra=1`, { expected: 400 });
+    await json(api, `${apiPath}/history?limit=1`, { authenticated: true, expected: 400 });
+    await json(web, `${bffPath}/history?limit=1`, { expected: 400 });
+    await json(api, `/v1/sessions/${foreignSession.id}/synthesis/history`, {
+      authenticated: true,
+      expected: 404,
+    });
+    await json(web, `/api/sessions/${foreignSession.id}/synthesis/history`, { expected: 404 });
     await json(web, '/api/sessions/not-a-uuid/synthesis', { expected: 400 });
     assert.equal(await hostileHost(bffPath), 403);
+    assert.equal(await hostileHost(`${bffPath}/history`), 403);
   });
   stage = 'explicit website request, exact replay and one worker attempt';
   const queued = validateSessionSynthesisResponse(
@@ -753,6 +839,51 @@ try {
     );
     await mcp.get({ id: other.id, requestId: cliInput.requestId }, true);
   });
+  stage = 'retained history discovers earlier ready versions after a later failure';
+  await history([cliInput.requestId, input.requestId], ['ready', 'ready']);
+  const failedInput = { requestId: randomUUID(), expectedInputHash: preview.inputHash };
+  await json(web, bffPath, {
+    body: failedInput,
+    originHeader: web,
+    expected: 202,
+    schema: SessionSynthesisResponseSchema,
+  });
+  const failedJob = store.claimSessionSynthesis(synthesis.configuration);
+  assert.ok(failedJob, 'The explicit synthetic failure request was not claimable.');
+  assert.equal(failedJob.id, failedInput.requestId);
+  store.failSessionSynthesis(failedJob);
+  assert.equal(providerCalls, 2, 'The manual failure fixture unexpectedly invoked a provider.');
+  const retainedIds = [failedInput.requestId, cliInput.requestId, input.requestId];
+  const retainedStatuses = ['failed', 'ready', 'ready'];
+  const retained = await history(retainedIds, retainedStatuses);
+  assert.equal(retained.items[0].failureCode, 'PROVIDER_FAILED');
+  await readOnly(async () => {
+    const latest = await page(pagePath);
+    assert.ok(latest.includes('Retained interpretation requests'));
+    assert.ok(latest.includes('Request failed'));
+    assert.ok(
+      latest.includes(input.requestId),
+      'The older ready request disappeared from history.',
+    );
+    const earlier = await page(
+      `${pagePath}?${new URLSearchParams({ requestId: input.requestId })}`,
+    );
+    assert.ok(earlier.includes('Request ready'));
+    assert.ok(earlier.includes('Original request ID'));
+    assert.ok(earlier.includes(input.requestId));
+    assert.ok(earlier.includes(failedInput.requestId));
+    const replay = await json(web, bffPath, {
+      body: failedInput,
+      originHeader: web,
+      schema: SessionSynthesisResponseSchema,
+    });
+    assert.equal(replay.request.id, failedInput.requestId);
+    assert.equal(replay.request.status, 'failed');
+    const otherHistory = await json(web, `/api/sessions/${other.id}/synthesis/history`, {
+      schema: SessionSynthesisHistorySchema,
+    });
+    assert.deepEqual(validateSessionSynthesisHistory(otherHistory, other.id).items, []);
+  });
   stage = 'stale evidence, immutable replay and deletion fences';
   store.createSessionNote(context, session.id, {
     id: randomUUID(),
@@ -790,17 +921,23 @@ try {
       true,
     );
   });
+  await history(retainedIds, retainedStatuses, true);
   store.deleteSession(context, session.id);
   await readOnly(async () => {
     await json(api, apiPath, { authenticated: true, expected: 404 });
+    await json(api, `${apiPath}/history`, { authenticated: true, expected: 404 });
     await json(web, `${bffPath}?requestId=${input.requestId}`, { expected: 404 });
     await json(web, `${bffPath}/preview`, { expected: 404 });
+    await json(web, `${bffPath}/history`, { expected: 404 });
     await mcp.get({ id: session.id, requestId: input.requestId }, true);
+    await mcp.history({ id: session.id }, true);
     const denied = await cli(
       ['session', 'synthesis', session.id, '--request-id', input.requestId],
       1,
     );
     assert.equal(denied.stdout, '');
+    const deniedHistory = await cli(['session', 'synthesis-history', session.id], 1);
+    assert.equal(deniedHistory.stdout, '');
   });
   assert.equal(await runSessionSynthesisOnce(store, synthesis), false);
   assert.equal(providerCalls, 2);
@@ -817,9 +954,12 @@ try {
     compiledWebsite: true,
     compiledCli: true,
     mcpStdio: true,
-    tools: 13,
+    tools: 14,
+    retainedHistoryVersions: 3,
+    historyDiscovery: 'passed',
+    failedRequestFixture: 'manually failed without a provider call',
     readOnlyGates: 'passed',
-    requestIds: [input.requestId, cliInput.requestId],
+    requestIds: [input.requestId, cliInput.requestId, failedInput.requestId],
     sessionId: session.id,
     checkedAt: new Date().toISOString(),
   };

@@ -4,6 +4,7 @@ import type {
   SessionSynthesisAnalysis,
   SessionSynthesisConfiguration,
   SessionSynthesisInput,
+  SessionSynthesisHistory,
   SessionSynthesisPreview,
   SessionSynthesisRequest,
   SessionSynthesisResponse,
@@ -21,6 +22,11 @@ export interface SessionSynthesizer {
   synthesize(input: SessionSynthesisInput): Promise<SessionSynthesisAnalysis>;
 }
 export interface SessionSynthesisStore {
+  listSessionSyntheses(
+    context: LocalContext,
+    sessionId: string,
+    configuration: SessionSynthesisConfiguration | null,
+  ): SessionSynthesisHistory;
   getSessionSynthesisPreview(
     context: LocalContext,
     sessionId: string,

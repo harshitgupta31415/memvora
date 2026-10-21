@@ -130,6 +130,59 @@
   color: var(--subtle);
   margin-bottom: 12px;
 }
+.history {
+  margin-bottom: 20px;
+  padding: 22px 25px;
+  min-width: 0;
+}
+.history h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+.historyDetails {
+  margin: 20px 0;
+}
+.historyDetails summary {
+  cursor: pointer;
+  color: var(--subtle);
+  font-size: 12px;
+}
+.historyList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+  gap: 12px;
+  padding: 0;
+  margin: 14px 0;
+  list-style: none;
+}
+.historyRow,
+.historySelected {
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  min-width: 0;
+}
+.historySelected {
+  border-color: var(--accent);
+}
+.historyLink {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
+}
+.historyState {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.historyId {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
 @media (max-width: 1000px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);

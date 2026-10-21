@@ -2,15 +2,37 @@ import 'server-only';
 import {
   SessionSynthesisPreviewSchema,
   SessionSynthesisResponseSchema,
+  SessionSynthesisHistorySchema,
   type CreateSessionSynthesis,
   type SessionSynthesisPreview,
   type SessionSynthesisResponse,
+  type SessionSynthesisHistory,
 } from '@memvora/contracts';
 import {
   validateSessionSynthesisPreview,
   validateSessionSynthesisResponse,
+  validateSessionSynthesisHistory,
 } from '@memvora/core/session-synthesis';
 import { apiRequest, type ApiResult } from './api';
+
+export async function synthesisHistory(
+  sessionId: string,
+): Promise<ApiResult<SessionSynthesisHistory>> {
+  const result = await apiRequest(
+    `/v1/sessions/${encodeURIComponent(sessionId)}/synthesis/history`,
+    SessionSynthesisHistorySchema,
+  );
+  if (!result.ok) return result;
+  try {
+    return { ...result, data: validateSessionSynthesisHistory(result.data, sessionId) };
+  } catch {
+    return {
+      ok: false,
+      status: 502,
+      message: 'Retained requests did not match the selected investigation.',
+    };
+  }
+}
 
 export async function synthesisPreview(
   sessionId: string,
