@@ -11,7 +11,10 @@ import type {
   LocalContext,
   SessionSynthesisAnalysis,
   SessionSynthesisConfiguration,
+  SessionSynthesisCoverage,
+  SessionSynthesisHistory,
   SessionSynthesisInput,
+  SessionSynthesisMetadata,
   SessionSynthesisPreview,
   SessionSynthesisRequest,
   SessionSynthesisResponse,
@@ -22,6 +25,7 @@ import {
   DomainError,
   sessionSynthesisInputHash,
   validateSessionSynthesisAnalysis,
+  validateSessionSynthesisHistory,
   validateSessionSynthesisPreview,
   validateSessionSynthesisResponse,
 } from '@memvora/core';
@@ -48,6 +52,8 @@ const notFound = () =>
   new DomainError('NOT_FOUND', 'The requested resource is not available in this workspace.', 404);
 const invalid = () =>
   new DomainError('INVALID_SYNTHESIS_REQUEST', 'The synthesis request is invalid.', 400);
+const invalidHistory = () =>
+  new DomainError('INVALID_SYNTHESIS_DATA', 'The stored synthesis history is invalid.', 500);
 const changed = () =>
   new DomainError('SYNTHESIS_INPUT_CHANGED', 'The investigation changed. Preview it again.', 409);
 const configurationText = (configuration: SessionSynthesisConfiguration) =>
@@ -375,6 +381,90 @@ export class SessionSyntheses {
         configuration,
         request: row ? this.dto(row, scope, configuration) : null,
       };
+    }, 'read');
+  }
+
+  /** A complete bounded metadata list; source, analysis and full input text never cross into JS. */
+  history(
+    context: LocalContext,
+    sessionId: string,
+    configuration: SessionSynthesisConfiguration | null,
+  ): SessionSynthesisHistory {
+    checkId(sessionId);
+    checkConfiguration(configuration);
+    return this.access.transaction(() => {
+      const scope = this.scope(context, sessionId);
+      let rows: Row[];
+      try {
+        rows = this.access.database
+          .prepare(
+            `SELECT id,workspace_id,user_id,repository_id,session_id,
+              workspace_generation,repository_generation,session_generation,
+              CASE WHEN length(CAST(revision_json AS BLOB))<=16384 THEN revision_json ELSE NULL END AS revision_json,
+              input_hash,
+              CASE WHEN length(CAST(configuration_json AS BLOB))<=4096 THEN configuration_json ELSE NULL END AS configuration_json,
+              status,attempts,created_at,started_at,finished_at,failure_code,
+              json_extract(CASE WHEN length(CAST(input_json AS BLOB))<=65536 THEN input_json ELSE NULL END,'$.coverage') AS coverage_json
+            FROM local_session_syntheses
+            WHERE workspace_id=? AND session_id=? AND user_id=? AND repository_id=?
+              AND workspace_generation=? AND repository_generation=? AND session_generation=?
+            ORDER BY ordinal DESC LIMIT 33`,
+          )
+          .all(
+            context.workspace.id,
+            sessionId,
+            context.user.id,
+            scope.repositoryId,
+            scope.workspaceGeneration,
+            scope.repositoryGeneration,
+            scope.sessionGeneration,
+          );
+      } catch {
+        // SQLite JSON diagnostics must never expose stored evidence to a caller.
+        throw invalidHistory();
+      }
+      if (rows.length > 32) throw invalidHistory();
+      const items: SessionSynthesisMetadata[] = rows.map((row) => {
+        if (!this.sameScope(row, scope) || typeof row['revision_json'] !== 'string')
+          throw invalidHistory();
+        const storedConfiguration = decode<SessionSynthesisConfiguration>(
+          row['configuration_json'],
+        );
+        if (!Check(SessionSynthesisConfigurationSchema, storedConfiguration))
+          throw invalidHistory();
+        return {
+          id: text(row, 'id'),
+          sessionId: text(row, 'session_id'),
+          repositoryId: text(row, 'repository_id'),
+          status: text(row, 'status') as SessionSynthesisMetadata['status'],
+          attempts: number(row, 'attempts'),
+          createdAt: text(row, 'created_at'),
+          startedAt: nullable(row, 'started_at'),
+          finishedAt: nullable(row, 'finished_at'),
+          inputHash: text(row, 'input_hash'),
+          configuration: storedConfiguration,
+          coverage: decode<SessionSynthesisCoverage>(row['coverage_json']),
+          stale:
+            row['revision_json'] !== scope.revision ||
+            configuration === null ||
+            configurationText(storedConfiguration) !== configurationText(configuration),
+          failureCode: nullable(row, 'failure_code') as SessionSynthesisMetadata['failureCode'],
+        };
+      });
+      return validateSessionSynthesisHistory(
+        {
+          sessionId,
+          repositoryId: scope.repositoryId,
+          configuration,
+          items,
+          retainedCount: items.length,
+          requestLimit: 32,
+          order: 'newest_requested_first',
+          analysisIncluded: false,
+          sourcesIncluded: false,
+        },
+        sessionId,
+      );
     }, 'read');
   }
 

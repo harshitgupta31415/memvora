@@ -38,6 +38,7 @@ import {
   SessionNotesQuerySchema,
   SessionNoteSearchResponseSchema,
   SessionRecapSchema,
+  SessionSynthesisHistorySchema,
   SessionSynthesisPreviewSchema,
   SessionSynthesisResponseSchema,
   SessionHandoverSchema,
@@ -278,6 +279,24 @@ export function buildApp(options: AppOptions = {}) {
     { schema: { body: CreateSessionSchema, response: { 201: SessionResponseSchema } } },
     async (request, reply) =>
       reply.code(201).send({ session: store.createSession(service.context(), request.body) }),
+  );
+  app.get(
+    '/v1/sessions/:id/synthesis/history',
+    {
+      schema: {
+        params: idParams,
+        querystring: Type.Object({}, { additionalProperties: false }),
+        response: { 200: SessionSynthesisHistorySchema },
+      },
+    },
+    async (request, reply) => {
+      reply.header('cache-control', 'no-store');
+      return store.listSessionSyntheses(
+        service.context(),
+        request.params.id,
+        options.synthesis?.configuration ?? null,
+      );
+    },
   );
   app.get(
     '/v1/sessions/:id/synthesis/preview',

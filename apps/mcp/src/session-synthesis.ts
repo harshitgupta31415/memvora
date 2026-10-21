@@ -1,7 +1,33 @@
-import type { SessionSynthesisResponse } from '@memvora/contracts';
-import { validateSessionSynthesisResponse } from '@memvora/core';
+import type { SessionSynthesisHistory, SessionSynthesisResponse } from '@memvora/contracts';
+import { validateSessionSynthesisHistory, validateSessionSynthesisResponse } from '@memvora/core';
 
 export const SESSION_SYNTHESIS_BYTE_LIMIT = 96 * 1024;
+
+/** Return every retained row unchanged, or fail closed when the full envelope cannot fit. */
+export function buildSessionSynthesisHistoryResult(
+  value: SessionSynthesisHistory,
+  sessionId: string,
+) {
+  const history = validateSessionSynthesisHistory(value, sessionId);
+  const result = {
+    ...history,
+    readOnly: true,
+    label: 'Retained AI interpretation requests — unverified',
+    maxBytes: SESSION_SYNTHESIS_BYTE_LIMIT,
+    evidenceNotice:
+      'All retained request metadata is preserved in newest-requested order. Analysis and sources are excluded; use get_session_synthesis with an original requestId for detail. Reads never submit work or retry a provider attempt. Ready interpretations remain unverified; stale means evidence or provider configuration changed.',
+  };
+  if (
+    Buffer.byteLength(
+      JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(result) }] }),
+      'utf8',
+    ) > SESSION_SYNTHESIS_BYTE_LIMIT
+  )
+    throw new Error(
+      'Complete synthesis history metadata exceeds the supported tool response budget.',
+    );
+  return result;
+}
 
 function excerpt(value: string, budget: number): string {
   if (Buffer.byteLength(JSON.stringify(value), 'utf8') - 2 <= budget) return value;

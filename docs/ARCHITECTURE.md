@@ -157,6 +157,14 @@ Before publication, the store checks the persisted lease token, original descrip
 
 Configuration is immutable within each running API/worker process. Maintenance can fence work that differs from the configuration that process sees; reads report mismatch without writes, and completion compares the job descriptor to its persisted one. This does not coordinate dynamic environment changes across hosts. Source-ID membership and structured output validation protect citation scope and the 24 KiB analysis limit, but do not prove that generated claims follow from their sources. The interface labels all generated analysis as inference, keeps authored notes as unverified claims, and distinguishes suggested checks from actual execution. A successful command or provider response proves no causal fix.
 
+### Implemented local synthesis history discovery
+
+The protected `GET /v1/sessions/:id/synthesis/history` adds a read path over existing schema-9 request records, with no migration or new service. A single read transaction authorizes the current principal/workspace/repository/session generations and computes the current content revision once. SQL selects bounded request metadata plus extracted input coverage in descending durable append order. It does not select analysis/source JSON or return the full input JSON to application objects. A limit of 33 detects violation of the retained 32-request bound; the complete valid result has `retainedCount === items.length`, no pagination and no silent member clipping. Shared contracts enforce scope, unique identities, lifecycle consistency, configuration staleness and a 64 KiB compact JSON response limit. Corrupt or incompatible metadata fails closed.
+
+Metadata includes the original UUID/hash, status, attempt count, timestamps, saved provider descriptor, coverage, failure code and current `stale` flag. Analysis, original event/note text, diffs, provider input and citation arrays remain available only through their separate authorized detail/source reads. Disabled provider configuration and empty sessions still permit history reads. They do not trigger maintenance, expire a lease, change retention, create requests, call a provider or write evidence.
+
+The website version list, CLI `session synthesis-history` and read-only MCP `get_session_synthesis_history` consume this shared read contract. The website links exact request UUIDs, allowing an older ready version to be opened after a newer failure instead of guessing a prior ID. Detail selection does not become a retry. The MCP adapter preserves every metadata row and identity within its own 96 KiB escaped envelope or returns an error. This adds discovery without pruning immutable request history, changing one-attempt admission or widening source access.
+
 ## Read flow
 
 ```text

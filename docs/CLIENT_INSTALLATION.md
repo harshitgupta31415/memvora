@@ -86,7 +86,7 @@ Use direct Node for MCP so stdout remains protocol-only. Configure the host with
 }
 ```
 
-Host configuration keys can differ. Restart/reconnect the chosen host, call `memvora_status`, then retrieve an actual captured event through `search_memory` and `get_memory`. Version 0.5.0 exposes the same thirteen read-only tools and API authorization boundaries as the source adapter, including `get_session_synthesis`. Synthesis creation remains an explicit website/CLI action; installation and reads do not enable a provider. See [the MCP guide](../apps/mcp/README.md), [SESSION_SYNTHESIS.md](SESSION_SYNTHESIS.md) and [OWNER_SETUP.md](OWNER_SETUP.md) for the real-host checks.
+Host configuration keys can differ. Restart/reconnect the chosen host, call `memvora_status`, then retrieve an actual captured event through `search_memory` and `get_memory`. Version 0.6.0 exposes the same fourteen read-only tools and API authorization boundaries as the source adapter, including `get_session_synthesis` and `get_session_synthesis_history`. Synthesis creation remains an explicit website/CLI action; installation and reads do not enable a provider. See [the MCP guide](../apps/mcp/README.md), [SESSION_SYNTHESIS.md](SESSION_SYNTHESIS.md) and [OWNER_SETUP.md](OWNER_SETUP.md) for the real-host checks.
 
 ## Upgrade and remove
 

@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   SessionSynthesisPreviewSchema,
   SessionSynthesisResponseSchema,
@@ -11,9 +12,14 @@ import {
 } from '@memvora/contracts';
 import { getJson, submitJson } from '@/lib/client-api';
 import { retainedSynthesisAttempt } from '@/lib/session-synthesis';
+import {
+  createSynthesisRetryStore,
+  decodeSynthesisRetrySnapshot,
+} from '@/lib/synthesis-retry-store';
 import { SourceLinks, SourceList } from './evidence';
 import { DateLabel } from './ui';
 import { Icon } from './icon';
+import { CopySynthesisIdentity } from './synthesis-identity';
 import styles from './session-synthesis.module.css';
 
 const failureLabels = {
@@ -32,18 +38,49 @@ export function SessionSynthesisPanel({
   initialPreview: SessionSynthesisPreview;
   initialStatus: SessionSynthesisResponse;
 }) {
+  const router = useRouter();
   const [preview, setPreview] = useState(initialPreview);
   const [status, setStatus] = useState(initialStatus);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState<CreateSessionSynthesis | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const scope = useMemo(
+    () => ({ sessionId, repositoryId: initialPreview.repositoryId }),
+    [sessionId, initialPreview.repositoryId],
+  );
+  const retryStore = useMemo(
+    () => createSynthesisRetryStore(scope, () => window.sessionStorage),
+    [scope],
+  );
+  const retrySnapshot = useSyncExternalStore(
+    retryStore.subscribe,
+    retryStore.getSnapshot,
+    retryStore.getServerSnapshot,
+  );
+  const recovered = useMemo(
+    () => decodeSynthesisRetrySnapshot(retrySnapshot, scope),
+    [retrySnapshot, scope],
+  );
+  const activeAttempt = attempt ?? recovered.input;
   const busy = useRef(false);
   const path = `/api/sessions/${encodeURIComponent(sessionId)}/synthesis`;
   const request = status.request;
   const analysis = request?.analysis;
-  const uncertain = attempt !== null && !confirmed;
-  async function action(kind: 'submit' | 'status' | 'preview') {
+  const knownAccepted =
+    activeAttempt !== null &&
+    request?.id === activeAttempt.requestId &&
+    request.inputHash === activeAttempt.expectedInputHash;
+  const uncertain = activeAttempt !== null && !knownAccepted;
+  useEffect(() => {
+    if (
+      recovered.input &&
+      request?.id === recovered.input.requestId &&
+      request.inputHash === recovered.input.expectedInputHash
+    )
+      retryStore.clear(recovered.input);
+  }, [recovered.input, request, retryStore]);
+  async function action(kind: 'submit' | 'status' | 'preview' | 'recover') {
     if (busy.current) return;
     busy.current = true;
     setPending(true);
@@ -56,13 +93,20 @@ export function SessionSynthesisPanel({
         setPreview(next);
         // This explicit action prepares a different attempt; no model work is requested.
         setAttempt(null);
+        retryStore.clear();
         setConfirmed(false);
       } else {
         const input =
           kind === 'submit'
-            ? retainedSynthesisAttempt(preview, attempt, () => crypto.randomUUID())
-            : attempt;
-        if (kind === 'submit') setAttempt(input);
+            ? retainedSynthesisAttempt(preview, activeAttempt, () => crypto.randomUUID())
+            : kind === 'recover' || !request
+              ? activeAttempt
+              : null;
+        if (kind === 'submit' && input) {
+          setAttempt(input);
+          // Persist before the network write; restore never initiates a request.
+          retryStore.save(input);
+        }
         const requestId = input?.requestId ?? request?.id;
         const next =
           kind === 'submit' && input
@@ -81,7 +125,14 @@ export function SessionSynthesisPanel({
             'The response does not match this investigation and request. Keep the original retry identity.',
           );
         setStatus(next);
-        if (input && next.request?.id === input.requestId) setConfirmed(true);
+        if (input && next.request?.id === input.requestId) {
+          setConfirmed(true);
+          retryStore.clear(input);
+          setAttempt(null);
+          router.replace(
+            `/sessions/${encodeURIComponent(sessionId)}/synthesis?${new URLSearchParams({ requestId: input.requestId })}`,
+          );
+        } else router.refresh();
       }
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'The request could not be confirmed.');
@@ -90,7 +141,12 @@ export function SessionSynthesisPanel({
       setPending(false);
     }
   }
-  const canRequest = (preview.availability === 'available' || uncertain) && !confirmed;
+  const activeRequest = request?.status === 'queued' || request?.status === 'running';
+  const canRequest =
+    (preview.availability === 'available' || uncertain) &&
+    (!confirmed || uncertain) &&
+    !knownAccepted &&
+    (!activeRequest || uncertain);
   const claim = (item: NonNullable<typeof analysis>['overview'], index: number) => (
     <li key={index}>
       <p>{item.text}</p>
@@ -106,6 +162,28 @@ export function SessionSynthesisPanel({
           Requesting interpretation sends this selected evidence to the configured provider. Reading
           or refreshing this page does not invoke a model.
         </p>
+        {recovered.notice && (
+          <p className={styles.warning} role="status">
+            {recovered.notice}
+          </p>
+        )}
+        {recovered.input && attempt === null && uncertain && (
+          <div className={styles.notice} role="status">
+            <p>
+              Recovered an unconfirmed submission from this tab. Only its request ID and reviewed
+              hash were stored; no model work was requested during recovery.
+            </p>
+            <button
+              className="button button-small button-ghost"
+              disabled={pending}
+              onClick={() => {
+                void action('recover');
+              }}
+            >
+              Check recovered request
+            </button>
+          </div>
+        )}
         <dl className={styles.facts}>
           <div>
             <dt>Availability</dt>
@@ -207,12 +285,16 @@ export function SessionSynthesisPanel({
             may still be processing.
           </p>
         )}
-        {attempt && (
+        {activeAttempt && (
           <div className={styles.hash}>
             <span>Retained request ID</span>
-            <code>{attempt.requestId}</code>
+            <code>{activeAttempt.requestId}</code>
             <span>Pinned input hash</span>
-            <code>{attempt.expectedInputHash}</code>
+            <code>{activeAttempt.expectedInputHash}</code>
+            <CopySynthesisIdentity
+              requestId={activeAttempt.requestId}
+              inputHash={activeAttempt.expectedInputHash}
+            />
           </div>
         )}
         {error && (

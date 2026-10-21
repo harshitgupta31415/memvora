@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { SessionSynthesisPreview, SessionSynthesisResponse } from '@memvora/contracts';
+import type {
+  SessionSynthesisHistory,
+  SessionSynthesisMetadata,
+  SessionSynthesisPreview,
+  SessionSynthesisResponse,
+} from '@memvora/contracts';
 import {
   prepareSynthesisRequest,
+  readSynthesisHistory,
   readSessionSynthesis,
   readSynthesisPreview,
   submitSessionSynthesis,
@@ -75,6 +81,50 @@ function preview(): SessionSynthesisPreview {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('CLI explicit session synthesis', () => {
+  it('reads complete history as metadata only and fails closed for foreign or expanded rows', async () => {
+    const request = response().request!;
+    const metadata = Object.fromEntries(
+      Object.entries(request).filter(([key]) => key !== 'analysis' && key !== 'sources'),
+    ) as SessionSynthesisMetadata;
+    const history: SessionSynthesisHistory = {
+      sessionId,
+      repositoryId,
+      configuration,
+      items: [metadata],
+      retainedCount: 1,
+      requestLimit: 32,
+      order: 'newest_requested_first',
+      analysisIncluded: false,
+      sourcesIncluded: false,
+    };
+    const fetcher = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(history)));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(readSynthesisHistory('http://127.0.0.1:4000', token, sessionId)).resolves.toEqual(
+      history,
+    );
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      `http://127.0.0.1:4000/v1/sessions/${sessionId}/synthesis/history`,
+    );
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: 'GET', redirect: 'error' });
+    await expect(
+      readSynthesisHistory('http://127.0.0.1:4000', token, '../private'),
+    ).rejects.toThrow('UUID');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    fetcher.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ...history, items: [{ ...metadata, sessionId: requestId }] })),
+    );
+    await expect(readSynthesisHistory('http://127.0.0.1:4000', token, sessionId)).rejects.toThrow(
+      'authorized evidence',
+    );
+    fetcher.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ ...history, items: [{ ...metadata, analysis: { private: true } }] }),
+      ),
+    );
+    await expect(readSynthesisHistory('http://127.0.0.1:4000', token, sessionId)).rejects.toThrow(
+      'authorized evidence',
+    );
+  });
   it('generates one identity and preserves an explicitly supplied retry identity', () => {
     const generate = vi.fn(() => requestId);
     expect(prepareSynthesisRequest(hash, undefined, generate)).toEqual({

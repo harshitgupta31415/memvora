@@ -22,6 +22,7 @@ import { resolveSyncFilter, synchronizeOutbox } from './outbox-sync.js';
 import { formatSessionRecap, readSessionRecap } from './session-recap.js';
 import {
   prepareSynthesisRequest,
+  readSynthesisHistory,
   readSessionSynthesis,
   readSynthesisPreview,
   submitSessionSynthesis,
@@ -309,6 +310,19 @@ session
     const { origin, token } = connection(binding);
     const result = await readSessionRecap(origin, token, sessionId);
     console.log(options.json ? JSON.stringify(result, null, 2) : formatSessionRecap(result));
+  });
+
+session
+  .command('synthesis-history [id]')
+  .description(
+    'Read all retained interpretation request metadata without requesting provider work or analysis payloads.',
+  )
+  .action(async (id: string | undefined) => {
+    const binding = id ? undefined : bound().binding;
+    const sessionId = id ?? binding?.sessionId;
+    if (!Check(IdSchema, sessionId)) throw new Error('An authorized session UUID is required.');
+    const { origin, token } = connection(binding);
+    console.log(JSON.stringify(await readSynthesisHistory(origin, token, sessionId), null, 2));
   });
 
 session

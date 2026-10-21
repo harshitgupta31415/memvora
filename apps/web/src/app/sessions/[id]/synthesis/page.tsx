@@ -5,8 +5,13 @@ import { IdSchema } from '@memvora/contracts';
 import { PageHeading, ErrorState } from '@/components/ui';
 import { Icon } from '@/components/icon';
 import { SessionSynthesisPanel } from '@/components/session-synthesis';
+import { SessionSynthesisHistoryPanel } from '@/components/session-synthesis-history';
 import { synthesisRequestQuery } from '@/lib/session-synthesis';
-import { synthesisPreview, synthesisStatus } from '@/lib/session-synthesis-server';
+import {
+  synthesisHistory,
+  synthesisPreview,
+  synthesisStatus,
+} from '@/lib/session-synthesis-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,9 +39,10 @@ export default async function Synthesis({
         </Link>
       </>
     );
-  const [preview, status] = await Promise.all([
+  const [preview, status, history] = await Promise.all([
     synthesisPreview(id),
     synthesisStatus(id, query.requestId),
+    synthesisHistory(id),
   ]);
   if (
     (!preview.ok && preview.status === 404) ||
@@ -54,8 +60,22 @@ export default async function Synthesis({
         title="AI interpretation"
         description="Review the bounded evidence and configured provider before explicitly requesting an interpretation. Observed recaps and authored notes remain separate."
       />
+      {history.ok ? (
+        <SessionSynthesisHistoryPanel
+          history={history.data}
+          {...(status.ok && status.data.request
+            ? { selectedRequestId: status.data.request.id }
+            : {})}
+        />
+      ) : (
+        <ErrorState
+          message={history.message}
+          detail="Retained request history could not be loaded. Existing request details remain independent."
+        />
+      )}
       {preview.ok && status.ok ? (
         <SessionSynthesisPanel
+          key={`${id}:${status.data.request?.id ?? 'none'}`}
           sessionId={id}
           initialPreview={preview.data}
           initialStatus={status.data}

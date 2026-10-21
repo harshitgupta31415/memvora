@@ -15,7 +15,7 @@ Read-only MCP adapter ---+                    |
 
 The web server, CLI and MCP share runtime response contracts and the same local API. They do not open the server evidence database directly. The CLI has its own SQLite outbox for offline durability. The API ordinarily runs the local background processor, one job at a time; a separate worker executable is also present. There is no need to start it for the default development flow.
 
-CLI and MCP version 0.5.0 can also be installed together from a private local tarball without this source checkout. Follow [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md) for Node requirements, isolated installation, explicit server credentials, upgrades and removal. The API and website remain separate processes; source-development commands below retain their existing fallback paths.
+CLI and MCP version 0.6.0 can also be installed together from a private local tarball without this source checkout. Follow [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md) for Node requirements, isolated installation, explicit server credentials, upgrades and removal. The API and website remain separate processes; source-development commands below retain their existing fallback paths.
 
 Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. Lexical recall also searches the latest imported redacted code snapshot and returns immutable file citations. The optional provider path is separate and remains disabled unless explicitly configured.
 
@@ -77,11 +77,13 @@ node apps/cli/dist/index.js session recap <session-id> --json
 
 With a bound local capture, omit the ID to read its current investigation. An explicit ID uses the shared local connection without requiring a capture binding in the current directory. MCP tool `get_session_recap` accepts `{ "id": "<session-id>" }`, returns cited observed steps and disclosed coverage, and never executes the recorded commands. This remains a deterministic investigation recap; optional per-command enrichment and investigation interpretation are separate flows.
 
+With the compiled app running and an existing investigation containing at least three commands, `npm run acceptance:recap` checks API, CLI and real MCP agreement against original event UUIDs. It inserts no evidence or answer and verifies the evidence/processing counts remain unchanged. The ignored report is `.memvora/recap-acceptance.json`.
+
 ### Explicit investigation interpretation
 
 Open **AI interpretation** from an investigation to review provider/model, bounded coverage and the input hash, then explicitly request a cited interpretation. Reads never call a model. Requests retain a stable UUID/hash, allow one provider attempt, and show queued/running/ready/failed/superseded and stale state. New input does not silently regenerate a result. CLI supports `session synthesis-preview`, `session synthesize --input-hash` and `session synthesis`; MCP `get_session_synthesis` only reads results. Enable the independent `MEMVORA_SESSION_SYNTHESIS_ENABLED` flag deliberately with provider settings. See [SESSION_SYNTHESIS.md](SESSION_SYNTHESIS.md) for configuration, retry behavior, input limits and current boundaries.
 
-With the compiled app running and an existing investigation containing at least three commands, `npm run acceptance:recap` checks API, CLI and real MCP agreement against original event UUIDs. It inserts no evidence or answer and verifies the evidence/processing counts remain unchanged. The ignored report is `.memvora/recap-acceptance.json`.
+The interpretation page's retained-history panel exposes earlier request versions even when the latest attempt failed. CLI `session synthesis-history [id]` and MCP `get_session_synthesis_history({id})` share a bounded metadata-only read; opening an exact request retains its original sources. The browser saves only an unconfirmed request's scoped UUID/hash in tab storage before sending, restores it across reload without automatic submission, and clears matching metadata after confirmation. Storage failures remain visible, with current-page retry available. History/recovery needs no new schema migration and never invokes a model on reads; see [SESSION_SYNTHESIS.md](SESSION_SYNTHESIS.md).
 
 ### Personal portable handover
 

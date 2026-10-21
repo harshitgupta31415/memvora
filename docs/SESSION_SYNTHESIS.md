@@ -21,9 +21,13 @@ Only HTTPS endpoints or loopback HTTP are accepted; redirects are refused. The a
 
 Open an investigation and choose **AI interpretation**. The page shows the provider/model, selected and omitted event/note counts, prepared input size, excerpt limit and reviewed input hash. Fewer than two accepted commands cannot be submitted. Disabled and unavailable states remain explicit.
 
-**Request AI interpretation** submits one durable request. Refresh status manually to see queued, running, ready, failed or superseded state. Status reads do not create another request. An uncertain submission retains its request UUID and input hash; retry sends those exact values. **Review latest input** deliberately prepares a new attempt identity without submitting it. An earlier accepted request may still be processing; only one active request per investigation is admitted.
+**Request AI interpretation** submits one durable request. Refresh status manually to see queued, running, ready, failed or superseded state. Status reads do not create another request. Before sending, the browser saves only the unconfirmed submission's scoped session/repository UUIDs, request UUID and input hash in tab session storage. A reload in that tab restores the same identity without automatically submitting it. Once an accepted response or authorized status read confirms the same UUID/hash, the pending metadata is cleared; the durable request remains discoverable in history. If storage is unavailable, the page reports that its in-memory retry identity must be copied before leaving. This is metadata recovery, not an offline evidence outbox or guaranteed browser-crash recovery.
+
+**Review latest input** deliberately clears the retry identity and prepares a different attempt without submitting it. An earlier accepted request may still be processing; only one active request per investigation is admitted. Invalid, oversized or foreign-scope browser storage is not submitted. Recovery and normal status refresh remain separate actions when the displayed historical request differs from the unconfirmed submission.
 
 Ready results retain their original source links, input hash, provider/model and coverage. New commands, notes, closure or configuration changes mark earlier results stale. A request whose input changes before publication becomes superseded; it does not silently analyze the new evidence. A link containing `?requestId=<UUID>` selects a historical request rather than the latest one.
+
+The retained-history panel lists every current-scope request, newest requested first, including an older ready result after a newer failed request. It shows state, staleness, time, provider/model, coverage, UUID and hash, with links and explicit identity copying. Selecting a row actually switches the displayed request; **Open latest request** returns to the newest one. The list reports the retained count against the session's 32-request limit. More than six rows start collapsed. Request discovery does not retry failed work, transmit evidence to a provider or remove a retained version.
 
 ## CLI and MCP
 
@@ -34,6 +38,7 @@ node apps/cli/dist/index.js session synthesis-preview <session-id>
 node apps/cli/dist/index.js session synthesize <session-id> --input-hash <reviewed-hash>
 node apps/cli/dist/index.js session synthesis <session-id>
 node apps/cli/dist/index.js session synthesis <session-id> --request-id <request-uuid>
+node apps/cli/dist/index.js session synthesis-history <session-id>
 ```
 
 The private installed `memvora` command supports the same arguments. With a local binding, the session ID may be omitted. `synthesize` prints the request UUID and pinned hash to stderr before submitting. Preserve both after a timeout:
@@ -45,6 +50,8 @@ memvora session synthesize <session-id> --input-hash <original-hash> --request-i
 The same UUID and hash replay the original request, even if configuration or evidence has since changed; they never create another attempt. Reusing the UUID with a different hash is a conflict. Check status before choosing a new identity. There is no automatic retry after a failed or interrupted provider attempt.
 
 MCP `get_session_synthesis({id, requestId?})` only reads the latest or specified request. It retains request identity, state, staleness, provider/model, coverage, all source IDs and claim citations within a 96 KiB escaped envelope. Text may be shortened with an explicit flag. No synthesis creation, retry or command-execution MCP tool is exposed.
+
+MCP `get_session_synthesis_history({id})` and CLI `session synthesis-history [id]` read the protected history endpoint. They preserve all at-most-32 metadata records without pagination or automatic detail expansion. The API list is bounded to 64 KiB and excludes submitted input, generated text and citation arrays (`analysisIncluded: false`, `sourcesIncluded: false`). The MCP content envelope is separately capped at 96 KiB; oversized or invalid metadata fails closed rather than dropping IDs. Use the existing detail command/tool with an exact returned UUID for its full saved interpretation and citations. History is a fresh read, not a frozen snapshot across later requests or state transitions.
 
 ## Evidence and durability
 
@@ -60,6 +67,6 @@ There is one active request per investigation and admission caps of 32 requests 
 
 ## Verification
 
-`npm run acceptance:synthesis` uses a disposable API database, compiled website/CLI/MCP and a clearly synthetic loopback HTTP provider. It does not load real credentials, user evidence or a real model. Focused tests additionally cover schema 8→9 migration, schemas 7/8/9 backup rehearsal, idempotency, quotas, interruption, late lower-sequence uploads, closure, scope/deletion, configuration changes, malformed/oversized/cross-source responses and bounded transport failures. See [STATUS.md](STATUS.md) for checks actually completed.
+`npm run acceptance:synthesis` uses a disposable API database, compiled website/CLI/MCP and a clearly synthetic loopback HTTP provider. It does not load real credentials, user evidence or a real model. It also compares complete metadata history across clients, selects an earlier ready result after a newer failed request and checks read-only counters. Focused tests cover browser retry storage/reload boundaries, schema 8→9 migration, schemas 7/8/9 backup rehearsal, idempotency, quotas, interruption, late lower-sequence uploads, closure, scope/deletion, configuration changes, malformed/oversized/cross-source responses and bounded transport failures. History/recovery adds no database migration. See [STATUS.md](STATUS.md) for checks actually completed.
 
 Real provider compatibility, model usefulness, semantic correctness, automatic history synthesis, imported-code reasoning and hosted multiuser authorization remain separate work.

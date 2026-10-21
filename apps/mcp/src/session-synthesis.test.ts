@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SessionSynthesisResponseSchema, type SessionSynthesisResponse } from '@memvora/contracts';
-import { buildSessionSynthesisResult, SESSION_SYNTHESIS_BYTE_LIMIT } from './session-synthesis.js';
+import {
+  SessionSynthesisResponseSchema,
+  type SessionSynthesisHistory,
+  type SessionSynthesisMetadata,
+  type SessionSynthesisResponse,
+} from '@memvora/contracts';
+import {
+  buildSessionSynthesisHistoryResult,
+  buildSessionSynthesisResult,
+  SESSION_SYNTHESIS_BYTE_LIMIT,
+} from './session-synthesis.js';
 import { request, toolResult } from './client.js';
 
 const sessionId = '12000000-0000-4000-8000-000000000001';
@@ -77,6 +86,61 @@ afterEach(() => {
 });
 
 describe('read-only MCP session synthesis presentation', () => {
+  it('retains all32 history rows and exact metadata within the escaped content budget', async () => {
+    const original = fixture().request!;
+    const metadata = Object.fromEntries(
+      Object.entries(original).filter(([key]) => key !== 'analysis' && key !== 'sources'),
+    ) as SessionSynthesisMetadata;
+    const history: SessionSynthesisHistory = {
+      sessionId,
+      repositoryId,
+      configuration: original.configuration,
+      retainedCount: 32,
+      requestLimit: 32,
+      order: 'newest_requested_first',
+      analysisIncluded: false,
+      sourcesIncluded: false,
+      items: Array.from({ length: 32 }, (_, index) => ({
+        ...metadata,
+        id: id(index + 200),
+        createdAt: `2026-10-21T09:59:${String(59 - index).padStart(2, '0')}.000Z`,
+      })),
+    };
+    const result = buildSessionSynthesisHistoryResult(history, sessionId);
+    const envelope = await toolResult(async () => result);
+    expect(envelope.isError).not.toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(envelope), 'utf8')).toBeLessThanOrEqual(
+      SESSION_SYNTHESIS_BYTE_LIMIT,
+    );
+    expect(result.items).toEqual(history.items);
+    expect(result.retainedCount).toBe(32);
+    expect(result.analysisIncluded).toBe(false);
+    expect(result.sourcesIncluded).toBe(false);
+    expect(result.readOnly).toBe(true);
+    expect(result.items.every((item) => !('analysis' in item) && !('sources' in item))).toBe(true);
+    const duplicate = {
+      ...history,
+      items: history.items.map((item) => ({ ...item, id: metadata.id })),
+    };
+    expect(() => buildSessionSynthesisHistoryResult(duplicate, sessionId)).toThrow(
+      'authorized evidence',
+    );
+    expect(() =>
+      buildSessionSynthesisHistoryResult({ ...history, repositoryId: id(999) }, sessionId),
+    ).toThrow('authorized evidence');
+    const oversized = {
+      ...history,
+      items: history.items.map((item) => ({
+        ...item,
+        configuration: {
+          ...item.configuration,
+          provider: '\u0000'.repeat(200),
+          model: '\u0000'.repeat(200),
+        },
+      })),
+    };
+    expect(() => buildSessionSynthesisHistoryResult(oversized, sessionId)).toThrow();
+  });
   it.each([
     'Explicit synthetic interpretation',
     '\u0000'.repeat(100),

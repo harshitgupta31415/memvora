@@ -5,9 +5,14 @@ import {
   type CreateSessionSynthesis,
   type SessionSynthesisPreview,
   type SessionSynthesisResponse,
+  type SessionSynthesisHistory,
 } from '@memvora/contracts';
 import { Check } from 'typebox/value';
-import { validateSessionSynthesisPreview, validateSessionSynthesisResponse } from '@memvora/core';
+import {
+  validateSessionSynthesisHistory,
+  validateSessionSynthesisPreview,
+  validateSessionSynthesisResponse,
+} from '@memvora/core';
 import { apiRequest } from './local.js';
 
 export function prepareSynthesisRequest(
@@ -29,6 +34,18 @@ export function synthesisRetryMessage(sessionId: string, input: CreateSessionSyn
 
 function validSession(id: string): void {
   if (!Check(IdSchema, id)) throw new Error('An authorized session UUID is required.');
+}
+
+export async function readSynthesisHistory(
+  origin: string,
+  token: string,
+  sessionId: string,
+): Promise<SessionSynthesisHistory> {
+  validSession(sessionId);
+  return validateSessionSynthesisHistory(
+    await apiRequest(origin, token, `/v1/sessions/${sessionId}/synthesis/history`),
+    sessionId,
+  );
 }
 
 export async function readSynthesisPreview(

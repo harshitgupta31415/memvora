@@ -8,9 +8,11 @@ The website, protected local API, explicit Windows CLI capture/outbox, original 
 
 The current architecture is a TypeScript modular monolith with shared contracts/domain/persistence and separate web, CLI, MCP and worker entry points. Additional independently deployed services are not needed to finish the personal local release.
 
-Private CLI/MCP installation is now implemented in version 0.5.0. [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md) documents its local tarball, Node requirements, explicit credentials and maintenance. The isolated installed-package acceptance checks an actual failing command, rejected upload, same-ID retry, raw recall and thirteen read-only MCP tools, including synthesis status. Windows/Linux and Node 24/26 CI are the release gates; see [STATUS.md](STATUS.md) for actual results.
+Private CLI/MCP installation is now implemented in version 0.6.0. [CLIENT_INSTALLATION.md](CLIENT_INSTALLATION.md) documents its local tarball, Node requirements, explicit credentials and maintenance. The isolated installed-package acceptance checks an actual failing command, rejected upload, same-ID retry, raw recall and fourteen read-only MCP tools, including synthesis status/history. Windows/Linux and Node 24/26 CI are the release gates; see [STATUS.md](STATUS.md) for actual results.
 
 [Explicit investigation interpretation](SESSION_SYNTHESIS.md) is implemented behind an independent disabled-by-default flag. It supports bounded original attempts/notes, cited unverified claims, durable single-attempt requests, replay, stale results and deletion fences. Loopback fixtures establish the connected flow; a chosen real provider and human usefulness judgments remain unverified.
+
+Retained synthesis history now exposes earlier ready, failed and stale versions through all clients. The website preserves only an unconfirmed submission's scoped UUID/hash across reload in the same tab, with no automatic resubmission. This is separate from a durable command or journal outbox.
 
 ## Personal MVP follow-up
 
