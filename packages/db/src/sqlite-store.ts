@@ -32,6 +32,7 @@ import type {
   SessionNotesQuery,
 } from '@memvora/contracts';
 import {
+  deriveRawEvidenceMemory,
   DomainError,
   newId,
   prepareSessionDirectoryRequest,
@@ -52,14 +53,17 @@ import { GitHubConnections } from './github-connections.js';
 import { SessionDirectoryCursors } from './session-directory-cursor.js';
 import type { SessionDirectoryScope } from './session-directory-cursor.js';
 import {
+  LOCAL_SQLITE_SCHEMA_VERSION,
   localFtsMigrationSql,
   localGitHubConnectionMigrationSql,
   localRepositorySourcesMigrationSql,
+  localRawEvidenceMigrationSql,
   localRetryMigrationSql,
   localSessionHistoryMigrationSql,
   localSessionNotesMigrationSql,
   localSchemaSql,
 } from './sqlite-schema.js';
+export { LOCAL_SQLITE_SCHEMA_VERSION } from './sqlite-schema.js';
 
 type Row = Record<string, SQLOutputValue>;
 type HistoryCursor = {
@@ -96,6 +100,27 @@ const immutableNoteConflict = () =>
   );
 const now = () => new Date().toISOString();
 const parse = <T>(value: SQLOutputValue | undefined): T => JSON.parse(String(value)) as T;
+const eventAccessJoins =
+  'JOIN local_sessions s ON s.id=e.session_id AND s.workspace_id=e.workspace_id AND s.repository_id=e.repository_id JOIN local_repositories r ON r.id=e.repository_id AND r.workspace_id=e.workspace_id JOIN local_workspaces w ON w.id=e.workspace_id';
+const eventAccessScope =
+  "e.workspace_id=? AND w.owner_user_id=? AND w.generation=? AND w.status='active' AND r.status='active' AND s.status!='deleted'";
+function rawSearchText(event: CapturedEvent): string {
+  return redactText(
+    [
+      event.command.executable,
+      ...event.command.args,
+      event.cwd,
+      event.git.commitSha ?? '',
+      event.outcome.kind,
+      event.outcome.exitCode === null ? '' : String(event.outcome.exitCode),
+      event.outcome.signal ?? '',
+      event.outcome.error?.code ?? '',
+      event.outcome.error?.message ?? '',
+      ...[...event.output].sort((a, b) => a.ordinal - b.ordinal).map((chunk) => chunk.text),
+      ...event.diffs.map((diff) => diff.text),
+    ].join('\n'),
+  );
+}
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const noteJoins =
   'JOIN local_sessions s ON s.id=n.session_id AND s.workspace_id=n.workspace_id AND s.repository_id=n.repository_id JOIN local_repositories r ON r.id=n.repository_id AND r.workspace_id=n.workspace_id JOIN local_workspaces w ON w.id=n.workspace_id';
@@ -162,7 +187,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     if (this.path !== ':memory:') mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     this.database = new DatabaseSync(this.path, { timeout: 5_000 });
     const version = this.one('PRAGMA user_version');
-    if (version && integer(version, 'user_version') > 7) {
+    if (version && integer(version, 'user_version') > LOCAL_SQLITE_SCHEMA_VERSION) {
       this.database.close();
       throw new Error('Local database schema is newer than this application.');
     }
@@ -170,7 +195,7 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     this.transaction(() => {
       // Re-read after BEGIN IMMEDIATE: another process may have migrated while this one waited.
       const currentVersion = integer(this.one('PRAGMA user_version') ?? {}, 'user_version');
-      if (currentVersion > 7)
+      if (currentVersion > LOCAL_SQLITE_SCHEMA_VERSION)
         throw new Error('Local database schema is newer than this application.');
       if (currentVersion < 2) {
         this.database.exec(localFtsMigrationSql);
@@ -196,6 +221,22 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
       if (currentVersion < 7) {
         this.database.exec(localSessionNotesMigrationSql);
         this.database.exec('PRAGMA user_version=7');
+      }
+      if (currentVersion < 8) {
+        this.database.exec(localRawEvidenceMigrationSql);
+        // Rebuild only this derived index. Stream one bounded stored event at a
+        // time; identities, payloads, intake ordinals, jobs and keys stay intact.
+        this.database.exec('DELETE FROM local_event_fts');
+        for (const row of this.database
+          .prepare(
+            'SELECT e.payload_json,i.id AS intake_id FROM local_events e JOIN local_event_intakes i ON i.event_id=e.id ORDER BY i.id',
+          )
+          .iterate())
+          this.indexRawEvidence(
+            parse<CapturedEvent>(row['payload_json']),
+            integer(row, 'intake_id'),
+          );
+        this.database.exec('PRAGMA user_version=8');
       }
     });
     this.transaction(() => {
@@ -246,6 +287,16 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
   }
   private run(sql: string, ...values: SQLInputValue[]) {
     return this.database.prepare(sql).run(...values);
+  }
+  private indexRawEvidence(event: CapturedEvent, intakeId: number): void {
+    if (!Number.isSafeInteger(intakeId) || intakeId < 1)
+      throw new DomainError('INVALID_INTAKE', 'The durable event intake identity is invalid.');
+    this.run(
+      'INSERT INTO local_event_fts(rowid,event_id,searchable_text) VALUES(?,?,?)',
+      intakeId,
+      event.eventId,
+      rawSearchText(event),
+    );
   }
   private transaction<T>(action: () => T, mode: 'write' | 'read' = 'write'): T {
     this.database.exec(mode === 'read' ? 'BEGIN' : 'BEGIN IMMEDIATE');
@@ -1516,7 +1567,11 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
           JSON.stringify(event),
           now(),
         );
-        this.run('INSERT INTO local_event_intakes(event_id) VALUES(?)', event.eventId);
+        const intake = this.run(
+          'INSERT INTO local_event_intakes(event_id) VALUES(?)',
+          event.eventId,
+        );
+        this.indexRawEvidence(event, Number(intake.lastInsertRowid));
         this.run(
           'INSERT INTO local_jobs(id,event_id,workspace_id,repository_id,session_id,workspace_generation,repository_generation,session_generation,available_at) VALUES(?,?,?,?,?,?,?,?,?)',
           event.eventId,
@@ -1534,65 +1589,115 @@ export class SqliteEvidenceStore implements LocalEvidenceStore {
     });
   }
   search(context: LocalContext, input: SearchRequest, sessionId?: string): Memory[] {
-    this.requireContext(context);
-    if (sessionId) this.sessionRow(context, sessionId);
-    const repositoryIds = input.repositoryIds ? [...new Set(input.repositoryIds)] : undefined;
-    if (repositoryIds) {
-      for (const id of repositoryIds) this.repositoryRow(context, id);
-      if (!repositoryIds.length) return [];
-    }
-    const stop = new Set([
-      'how',
-      'did',
-      'i',
-      'the',
-      'a',
-      'an',
-      'and',
-      'or',
-      'to',
-      'was',
-      'is',
-      'it',
-      'what',
-      'why',
-      'my',
-      'we',
-      'fix',
-      'fixed',
-    ]);
-    const query = input.query.trim().toLowerCase();
-    if (!query) throw new DomainError('INVALID_QUERY', 'A search query is required.');
-    const words = [...new Set(query.split(/\s+/).filter((word) => word && !stop.has(word)))].slice(
-      0,
-      12,
-    );
-    const terms = words.length ? words : [query];
-    // Every token is a quoted literal: user text cannot add FTS operators or column selectors.
-    const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(' OR ');
-    const sql = `SELECT m.summary_json,bm25(local_memory_fts) AS rank FROM local_memory_fts JOIN local_memories m ON m.id=local_memory_fts.memory_id JOIN local_events e ON e.id=m.event_id JOIN local_sessions s ON s.id=m.session_id JOIN local_repositories r ON r.id=m.repository_id JOIN local_workspaces w ON w.id=m.workspace_id WHERE local_memory_fts MATCH ? AND m.workspace_id=? AND w.status='active' AND w.generation=? AND r.status='active' AND s.status!='deleted'${repositoryIds ? ` AND m.repository_id IN (${repositoryIds.map(() => '?').join(',')})` : ''}${sessionId ? ' AND m.session_id=?' : ''} ORDER BY rank ASC,m.created_at DESC,m.id DESC LIMIT ?`;
-    return this.rows(
-      sql,
-      match,
-      context.workspace.id,
-      context.workspace.generation,
-      ...(repositoryIds ?? []),
-      ...(sessionId ? [sessionId] : []),
-      Math.min(input.limit ?? 10, 20),
-    ).map((row) => parse<Memory>(row['summary_json']));
+    return this.transaction(() => {
+      this.requireContext(context);
+      if (sessionId) this.sessionRow(context, sessionId);
+      const repositoryIds = input.repositoryIds ? [...new Set(input.repositoryIds)] : undefined;
+      if (repositoryIds) {
+        for (const id of repositoryIds) this.repositoryRow(context, id);
+        if (!repositoryIds.length) return [];
+      }
+      const stop = new Set([
+        'how',
+        'did',
+        'i',
+        'the',
+        'a',
+        'an',
+        'and',
+        'or',
+        'to',
+        'was',
+        'is',
+        'it',
+        'what',
+        'why',
+        'my',
+        'we',
+        'fix',
+        'fixed',
+      ]);
+      if (typeof input.query !== 'string' || input.query.length > 2000)
+        throw new DomainError('INVALID_QUERY', 'A bounded text search query is required.');
+      const limit = Math.min(input.limit ?? 10, 20);
+      if (!Number.isSafeInteger(limit) || limit < 1)
+        throw new DomainError('INVALID_QUERY', 'The search limit must be a positive integer.');
+      const query = input.query.trim().toLowerCase();
+      if (!query) throw new DomainError('INVALID_QUERY', 'A search query is required.');
+      const words = [
+        ...new Set(query.split(/\s+/).filter((word) => word && !stop.has(word))),
+      ].slice(0, 12);
+      const terms = words.length ? words : [query];
+      // Every token is a quoted literal: user text cannot add FTS operators or column selectors.
+      const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(' OR ');
+      const scope = `${eventAccessScope}${repositoryIds ? ` AND e.repository_id IN (${repositoryIds.map(() => '?').join(',')})` : ''}${sessionId ? ' AND e.session_id=?' : ''}`;
+      const values: SQLInputValue[] = [
+        match,
+        context.workspace.id,
+        context.user.id,
+        context.workspace.generation,
+        ...(repositoryIds ?? []),
+        ...(sessionId ? [sessionId] : []),
+      ];
+      const raw = this.rows(
+        `SELECT e.id,e.received_at,bm25(local_event_fts) AS rank FROM local_event_fts JOIN local_event_intakes i ON i.id=local_event_fts.rowid AND i.event_id=local_event_fts.event_id JOIN local_events e ON e.id=i.event_id ${eventAccessJoins} WHERE local_event_fts MATCH ? AND ${scope} ORDER BY rank ASC,e.received_at DESC,e.id DESC LIMIT 100`,
+        ...values,
+      );
+      const summaries = this.rows(
+        `SELECT e.id,e.received_at,bm25(local_memory_fts) AS rank FROM local_memory_fts JOIN local_memories m ON m.id=local_memory_fts.memory_id JOIN local_events e ON e.id=m.event_id AND m.id=e.id AND m.workspace_id=e.workspace_id AND m.repository_id=e.repository_id AND m.session_id=e.session_id ${eventAccessJoins} WHERE local_memory_fts MATCH ? AND ${scope} ORDER BY rank ASC,m.created_at DESC,e.id DESC LIMIT 100`,
+        ...values,
+      );
+      // BM25 values from separate corpora are not directly comparable. Fuse bounded
+      // rank positions, deduplicate first, then load at most the final event limit.
+      const candidates = new Map<string, { id: string; score: number; receivedAt: string }>();
+      for (const rows of [raw, summaries])
+        rows.forEach((row, index) => {
+          const id = string(row, 'id');
+          const candidate = candidates.get(id) ?? {
+            id,
+            score: 0,
+            receivedAt: string(row, 'received_at'),
+          };
+          candidate.score += 1 / (60 + index + 1);
+          candidates.set(id, candidate);
+        });
+      return [...candidates.values()]
+        .sort(
+          (a, b) =>
+            b.score - a.score ||
+            b.receivedAt.localeCompare(a.receivedAt) ||
+            b.id.localeCompare(a.id),
+        )
+        .slice(0, limit)
+        .map((candidate) => this.recallMemory(context, candidate.id));
+    }, 'read');
   }
   getMemory(context: LocalContext, id: string): Memory {
+    return this.transaction(() => this.recallMemory(context, id), 'read');
+  }
+  /** Called within a read snapshot; no enrichment, queue update or stored summary is created. */
+  private recallMemory(context: LocalContext, id: string): Memory {
     this.requireContext(context);
     const row = this.one(
-      "SELECT m.summary_json FROM local_memories m JOIN local_events e ON e.id=m.event_id JOIN local_sessions s ON s.id=m.session_id JOIN local_repositories r ON r.id=m.repository_id JOIN local_workspaces w ON w.id=m.workspace_id WHERE m.id=? AND m.workspace_id=? AND r.status='active' AND s.status!='deleted' AND w.status='active' AND w.generation=?",
-      id,
+      `SELECT e.payload_json,m.summary_json,j.status AS processing_status FROM local_events e ${eventAccessJoins} LEFT JOIN local_memories m ON m.event_id=e.id AND m.id=e.id AND m.workspace_id=e.workspace_id AND m.repository_id=e.repository_id AND m.session_id=e.session_id LEFT JOIN local_jobs j ON j.event_id=e.id AND j.workspace_id=e.workspace_id AND j.repository_id=e.repository_id AND j.session_id=e.session_id AND j.workspace_generation=w.generation AND j.repository_generation=r.generation AND j.session_generation=s.generation WHERE ${eventAccessScope} AND e.id=?`,
       context.workspace.id,
+      context.user.id,
       context.workspace.generation,
+      id,
     );
     if (!row) throw notFound();
-    const memory = parse<Memory>(row['summary_json']);
-    for (const source of memory.sources) this.getEvent(context, source.id);
-    return memory;
+    if (row['summary_json'] !== null) {
+      const memory = parse<Memory>(row['summary_json']);
+      for (const source of memory.sources) this.getEvent(context, source.id);
+      return memory;
+    }
+    const status = row['processing_status'];
+    return deriveRawEvidenceMemory(
+      parse<CapturedEvent>(row['payload_json']),
+      status === 'queued' || status === 'running' || status === 'failed' || status === 'ready'
+        ? status
+        : undefined,
+    );
   }
   private jobRow(context: LocalContext, id: string): Row {
     this.requireContext(context);

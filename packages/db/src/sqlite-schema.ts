@@ -1,4 +1,5 @@
 /** Local MVP storage. Future PostgreSQL migrations are a separate reviewed adapter. */
+export const LOCAL_SQLITE_SCHEMA_VERSION = 8;
 export const localSchemaSql = `
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
@@ -235,4 +236,12 @@ CREATE TRIGGER IF NOT EXISTS local_session_note_fts_delete AFTER DELETE ON local
 END;
 INSERT INTO local_session_note_fts(note_id,body)
   SELECT n.id,n.body FROM local_session_notes n WHERE NOT EXISTS(SELECT 1 FROM local_session_note_fts f WHERE f.note_id=n.id);
+`;
+
+/** Version 8 indexes accepted observations independently of enrichment availability. */
+export const localRawEvidenceMigrationSql = `
+CREATE VIRTUAL TABLE IF NOT EXISTS local_event_fts USING fts5(event_id UNINDEXED,searchable_text,tokenize='unicode61');
+CREATE TRIGGER IF NOT EXISTS local_event_fts_delete AFTER DELETE ON local_event_intakes BEGIN
+  DELETE FROM local_event_fts WHERE rowid=old.id;
+END;
 `;

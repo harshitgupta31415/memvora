@@ -14,7 +14,9 @@ import { backup, DatabaseSync } from 'node:sqlite';
 
 export const LOCAL_BACKUP_MAX_BYTES = 512 * 1024 * 1024;
 const MANIFEST_MAX_BYTES = 32 * 1024;
-const DATABASE_SCHEMA = 7;
+type BackupDatabaseSchema = 7 | 8;
+const supportedDatabaseSchema = (value: unknown): value is BackupDatabaseSchema =>
+  value === 7 || value === 8;
 const countQueries = {
   repositories: 'SELECT count(*) AS count FROM local_repositories',
   sessions: 'SELECT count(*) AS count FROM local_sessions',
@@ -42,7 +44,7 @@ export interface LocalBackupManifest {
   createdAt: string;
   database: {
     file: 'server.sqlite';
-    schemaVersion: 7;
+    schemaVersion: BackupDatabaseSchema;
     byteLength: number;
     sha256: string;
   };
@@ -138,7 +140,7 @@ function manifestValue(value: unknown): LocalBackupManifest {
     !timestamp(value['createdAt']) ||
     !exactKeys(value['database'], ['file', 'schemaVersion', 'byteLength', 'sha256']) ||
     value['database']['file'] !== 'server.sqlite' ||
-    value['database']['schemaVersion'] !== DATABASE_SCHEMA ||
+    !supportedDatabaseSchema(value['database']['schemaVersion']) ||
     !integer(value['database']['byteLength']) ||
     value['database']['byteLength'] < 1 ||
     value['database']['byteLength'] > LOCAL_BACKUP_MAX_BYTES ||
@@ -285,14 +287,7 @@ const requiredColumns = {
   local_repository_source_fts: ['source_id', 'searchable_text'],
   local_session_note_fts: ['note_id', 'body'],
 } as const;
-const ftsTables = ['local_memory_fts', 'local_repository_source_fts', 'local_session_note_fts'];
-const knownTables = new Set([
-  ...Object.keys(requiredColumns),
-  'sqlite_sequence',
-  ...ftsTables.flatMap((table) =>
-    ['data', 'idx', 'content', 'docsize', 'config'].map((suffix) => `${table}_${suffix}`),
-  ),
-]);
+const baseFtsTables = ['local_memory_fts', 'local_repository_source_fts', 'local_session_note_fts'];
 
 function scalar(database: DatabaseSync, sql: string): number {
   const value = database.prepare(sql).get()?.['count'];
@@ -300,12 +295,25 @@ function scalar(database: DatabaseSync, sql: string): number {
   return value;
 }
 
-function checkSchema(database: DatabaseSync): void {
-  if (database.prepare('PRAGMA user_version').get()?.['user_version'] !== DATABASE_SCHEMA)
+function checkSchema(database: DatabaseSync): BackupDatabaseSchema {
+  const version = database.prepare('PRAGMA user_version').get()?.['user_version'];
+  if (!supportedDatabaseSchema(version))
     throw new LocalBackupError(
       'UNSUPPORTED_BACKUP_SCHEMA',
-      'Only the current local database schema can be backed up or verified.',
+      'Only supported local database schemas can be backed up or verified.',
     );
+  const columnsByTable = {
+    ...requiredColumns,
+    ...(version === 8 ? { local_event_fts: ['event_id', 'searchable_text'] } : {}),
+  };
+  const ftsTables = [...baseFtsTables, ...(version === 8 ? ['local_event_fts'] : [])];
+  const knownTables = new Set([
+    ...Object.keys(columnsByTable),
+    'sqlite_sequence',
+    ...ftsTables.flatMap((table) =>
+      ['data', 'idx', 'content', 'docsize', 'config'].map((suffix) => `${table}_${suffix}`),
+    ),
+  ]);
   const objects = database
     .prepare("SELECT name,type,sql FROM sqlite_schema WHERE type IN ('table','view')")
     .all();
@@ -314,7 +322,7 @@ function checkSchema(database: DatabaseSync): void {
     objects.some((object) => object['type'] !== 'table' || !knownTables.has(String(object['name'])))
   )
     throw invalid();
-  for (const [table, expected] of Object.entries(requiredColumns)) {
+  for (const [table, expected] of Object.entries(columnsByTable)) {
     // Table names are compile-time constants, never derived from a file or manifest.
     const columns = database
       .prepare(`PRAGMA table_info(${table})`)
@@ -328,10 +336,14 @@ function checkSchema(database: DatabaseSync): void {
     if (typeof definition !== 'string' || !/\bUSING\s+fts5\s*\(/iu.test(definition))
       throw invalid();
   }
+  return version;
 }
 
-function inspect(database: DatabaseSync): BackupCounts {
-  checkSchema(database);
+function inspect(database: DatabaseSync): {
+  counts: BackupCounts;
+  schemaVersion: BackupDatabaseSchema;
+} {
+  const schemaVersion = checkSchema(database);
   if (
     database.prepare('PRAGMA integrity_check(1)').get()?.['integrity_check'] !== 'ok' ||
     database.prepare('PRAGMA foreign_key_check').get()
@@ -398,9 +410,24 @@ function inspect(database: DatabaseSync): BackupCounts {
       database.prepare('SELECT seq FROM sqlite_sequence WHERE name=?').get(table)?.['seq'] ?? 0;
     if (!integer(sequence) || sequence < maximum) throw invalid();
   }
-  return Object.fromEntries(
+  if (
+    schemaVersion === 8 &&
+    (database
+      .prepare(
+        'SELECT 1 FROM local_event_fts f LEFT JOIN local_event_intakes i ON i.id=f.rowid AND i.event_id=f.event_id WHERE i.id IS NULL LIMIT 1',
+      )
+      .get() ||
+      database
+        .prepare(
+          'SELECT 1 FROM local_event_intakes i LEFT JOIN local_event_fts f ON f.rowid=i.id AND f.event_id=i.event_id WHERE f.rowid IS NULL LIMIT 1',
+        )
+        .get())
+  )
+    throw invalid();
+  const counts = Object.fromEntries(
     Object.entries(countQueries).map(([key, sql]) => [key, scalar(database, sql)]),
   ) as BackupCounts;
+  return { counts, schemaVersion };
 }
 
 function openReadOnly(path: string): DatabaseSync {
@@ -522,9 +549,9 @@ export async function createLocalBackup(options: {
     chmodSync(destination, 0o600);
     const byteLength = regularFile(destination, LOCAL_BACKUP_MAX_BYTES);
     const snapshot = openReadOnly(destination);
-    let counts: BackupCounts;
+    let details: ReturnType<typeof inspect>;
     try {
-      counts = inspect(snapshot);
+      details = inspect(snapshot);
     } finally {
       snapshot.close();
     }
@@ -538,11 +565,11 @@ export async function createLocalBackup(options: {
       createdAt: new Date().toISOString(),
       database: {
         file: 'server.sqlite',
-        schemaVersion: 7,
+        schemaVersion: details.schemaVersion,
         byteLength,
         sha256: await sha256(destination),
       },
-      counts,
+      counts: details.counts,
       contents: { ...contents },
     };
     writeFileSync(join(directory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, {
@@ -577,12 +604,13 @@ export async function verifyLocalBackup(input: string): Promise<LocalBackupManif
     )
       throw invalid();
     snapshot = openReadOnly(path);
-    const counts = inspect(snapshot);
+    const details = inspect(snapshot);
     snapshot.close();
     snapshot = undefined;
     completedFiles(directory);
     if (
-      !Object.entries(counts).every(
+      details.schemaVersion !== manifest.database.schemaVersion ||
+      !Object.entries(details.counts).every(
         ([key, count]) => manifest.counts[key as keyof BackupCounts] === count,
       )
     )

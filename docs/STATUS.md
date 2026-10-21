@@ -4,6 +4,8 @@ Updated: 21 October 2026. Owner: harshitgupta31415.
 
 The first connected local product is implemented. The original hosted PRD remains the target for later authentication, installation authorization, PostgreSQL and organization features. Read this checkpoint before choosing the next task; do not restart from the scaffold description.
 
+Latest local checkpoint: schema 8 raw-evidence recall passed all 301 tests in 51 files, lint, strict workspace types, formatting, the optimized release build and all seven isolated acceptance scripts. The running application is on schema 8 with the existing evidence intact. See the raw-recall verification below and [OWNER_SETUP.md](OWNER_SETUP.md) for the account-specific checks that remain.
+
 ## Working locally
 
 - Responsive Next.js website: overview, repository registration and detail, investigations, original command evidence and diffs, memory detail, cited Ask, versioned repository-file sources, GitHub browsing/import and settings.
@@ -36,7 +38,7 @@ Investigation discovery now searches the full authorized session directory befor
 | Check                                  | Result                                                                                                                                                                                                     |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Lint and strict workspace types        | Passed                                                                                                                                                                                                     |
-| Regression suite                       | 279 tests in 48 files passed; one test worker                                                                                                                                                              |
+| Regression suite                       | 301 tests in 51 files passed; one test worker                                                                                                                                                              |
 | Shared packages and all service builds | Passed                                                                                                                                                                                                     |
 | Optimized Next.js build                | Passed using two page workers                                                                                                                                                                              |
 | Web build artifact guard               | 32 server traces checked; local evidence, credential and environment files excluded                                                                                                                        |
@@ -51,7 +53,7 @@ Investigation discovery now searches the full authorized session directory befor
 | Imported code retrieval                | Actual old-project Python source retrieved through API, CLI and MCP with the same source ID, commit/hash and line locator; empty/denied scope and no-evidence checks passed                                |
 | Import lifecycle                       | Backfill, stable versions, partial-import pointers, history admission, physical deletion, access-generation changes and remote-wait deletion fences passed                                                 |
 | Resource limits                        | Web and API listeners verified below-normal priority with Windows affinity mask 3: two logical processors                                                                                                  |
-| Private GitHub Actions CI              | Complete outbox checkpoint passed Ubuntu and Windows in [run 39535096200](https://github.com/harshitgupta31415/memvora-vips-cosmic/actions/runs/39535096200), including all six isolated acceptance checks |
+| Private GitHub Actions CI              | Complete outbox checkpoint passed Ubuntu and Windows in [run 39536458576](https://github.com/harshitgupta31415/memvora-vips-cosmic/actions/runs/39536458576), including all six isolated acceptance checks |
 
 The local acceptance report is `.memvora/local-acceptance.json`. Its two repository records are explicitly named `Local lab: email-normalization` and `Local lab: port-validation`. They contain real recorded executions of labeled test fixtures; no recall answer was inserted. The current data includes six events and six linked observed memories from these fixtures. Earlier test records were removed through the scoped deletion API.
 
@@ -131,6 +133,18 @@ This check exposed API-wide scalar coercion changing a submitted null signal int
 
 The `/capture-recovery` command builder was inspected at desktop and 390-pixel width: commands wrap without horizontal overflow, copy feedback works, and invalid UUIDs cannot generate upload commands. Folder/selector values stay in client state. Its actual rendered offline PowerShell command listed the existing three acknowledged port-validation events without modifying them. A read-only fingerprint confirms the six stored events, six memories, six immutable file sources, one note and existing repository/session records stayed unchanged. Ignored `outbox-acceptance.json`, `outbox-live-before.json` and `outbox-live-after.json` record the checks. Server backups still exclude repository-local outboxes. See [OUTBOX_RECOVERY.md](OUTBOX_RECOVERY.md).
 
+## Raw-evidence recall verification
+
+Accepted command/error evidence now has an independent redacted FTS index. Ask, CLI and MCP can retrieve queued, running or failed captures before a stored summary exists. Results are labeled observed `raw_event` projections with original event UUIDs/citations and current processing state when known. Reads create no stored memory, change no job and call no provider. Stored summaries take precedence even when the match is only in original output/diff; candidate scope and UUID deduplication precede the final result limit.
+
+All 301 tests in 51 files, lint, strict workspace types, formatting and the optimized release build passed. The 32-trace artifact exclusion guard passed. `npm run acceptance:raw-recall` checks the compiled protected API, CLI, actual MCP stdio and separate compiled website with deliberately synthetic evidence. Queued recall, three failing fixture-provider attempts, failed recall, explicit retry, successful fixture summary, deduplication, empty/repository/session/foreign scope, secret redaction, original citation identity and parent deletion passed. Read phases preserve SQLite `total_changes` and provider-call counts. No actual command, remote AI or GitHub service is involved in this check.
+
+The existing isolated GitHub App, journal/handover, directory, setup, backup and outbox acceptance scripts also passed. Regression tests cover migration/restart with preserved intake ordinals and cursor key, transactional intake/index/job rollback, raw-only matches outside displayed excerpts, missing/stale job state, physical deletion and escaped aggregate MCP output. Schema 7 backups remain verifiable without migration; schema 8 backups additionally validate raw-index/intake membership.
+
+With both main listeners stopped, the current schema 7 database was backed up and verified under ignored `.memvora/backups/snapshot-2026-10-21T03-52-22-383Z-1300e151-d6b8-4617-bf18-cdb1473cee8c`. The rebuilt application then migrated to schema 8 and backfilled six raw index entries. A complete logical fingerprint confirms unchanged repositories/sessions, six events, six stored memories, six imported sources, one authored note and intake identities. The old schema 7 backup still verifies through the new operator. Live history, recap and imported-source API/CLI/MCP acceptance passed again; existing error Ask succeeds and prefers its stored summaries. Ignored `raw-recall-live-checkpoint.json` and `raw-recall-live-after.json` record these checks.
+
+Desktop and 390-pixel browser review used a disposable synthetic queued event with no worker or stored summary. The captured-evidence notice, processing state, original-command navigation and submitted cited Ask answer passed without horizontal overflow. The separate fixture API/website were stopped and their checked temporary data removed. Only the main app remains on ports 3000/4000, with both listeners at BelowNormal priority and two-processor affinity. Bounded excerpts can omit matching text; the original capture remains the place to inspect full retained output and capture limits. Cross-event AI reasoning is still separate work.
+
 ## Running and continuing
 
 The compiled web and API can run with:
@@ -147,10 +161,16 @@ Private repository: [harshitgupta31415/memvora-vips-cosmic](https://github.com/h
 
 ## Next implementation work
 
-1. Register the private GitHub App and configure its client credentials using `GITHUB_SETUP.md`, then verify real browser authorization, token refresh and selected-repository import. The callback and installation flow are implemented and fixture-tested; no live App credential or owner consent was exercised. The current running connection remains `gh_cli`.
-2. Exercise the optional enrichment adapter against an explicitly configured real provider/model. Keep credentials in ignored local configuration. Loopback HTTP failure and validation behavior is covered; actual model compatibility and summary quality remain unverified. Deterministic investigation recaps are now implemented; optional AI interpretation across an investigation needs a separate cited, lifecycle-safe design.
-3. Add durable incremental GitHub synchronization after installation authorization and revocation are verified. Preserve immutable file-source provenance and explicit partial coverage while replacing the current one-shot import.
-4. Implement the hosted PostgreSQL/Drizzle/pg-boss adapter with reviewed migrations and scoped constraints, then real browser/device sessions and OS credential storage. Local bearer access must never become an implicit hosted auth bypass.
-5. Add optional vector retrieval, interactive PTY capture and company-owned handover only after their own requirements and acceptance gates are met.
+The account-specific steps are collected in [OWNER_SETUP.md](OWNER_SETUP.md); local development can continue without completing them. The following items are not advertised as implemented.
+
+1. Preserve Git probe failures explicitly. A failed status/diff must not appear as a clean tree or a valid empty snapshot; isolate repository probes from redirected Git environment and text-conversion filters. Improve per-command change attribution without treating snapshots as proof of causation. Untracked file contents remain outside capture scope.
+2. Package the CLI and MCP for installation outside this workspace, with a reproducible private distribution/install path and clean-machine verification. The current direct compiled Node entry points work locally but are not a published installer or device-pairing system.
+3. Design cited multi-event investigation synthesis with bounded context, safe invalidation/retries and visible inference. Current optional AI enriches one event; Ask and recaps compose observed evidence. Add retrieval-quality evaluation before claiming semantic or large-codebase coverage.
+4. Add explicit retention/pruning and a guarded live restore/reconciliation workflow. Verified snapshots and isolated recovery rehearsal exist, but do not replace a live restore policy or reconcile later deletions, jobs, credentials and unsynced outboxes.
+5. Register the private GitHub App and configure its client credentials using `GITHUB_SETUP.md`, then verify real browser authorization, token refresh and selected-repository import. The callback and installation flow are implemented and fixture-tested; no live App credential or owner consent was exercised. The current running connection remains `gh_cli`.
+6. Exercise the optional enrichment adapter against an explicitly configured real provider/model. Keep credentials in ignored local configuration. Loopback HTTP failure and validation behavior is covered; actual model compatibility and summary quality remain unverified. Deterministic investigation recaps are now implemented; optional AI interpretation across an investigation needs a separate cited, lifecycle-safe design.
+7. Add durable incremental GitHub synchronization after installation authorization and revocation are verified. Preserve immutable file-source provenance and explicit partial coverage while replacing the current one-shot import.
+8. Implement the hosted PostgreSQL/Drizzle/pg-boss adapter with reviewed migrations and scoped constraints, then real browser/device sessions and OS credential storage. Local bearer access must never become an implicit hosted auth bypass.
+9. Add optional vector retrieval, interactive PTY capture and company-owned handover only after their own requirements and acceptance gates are met.
 
 Production browser/device authentication, continuous GitHub App sync/webhooks, webhook-driven installed-repository revocation, multiuser/company roles, vector retrieval and interactive PTY are not complete. Do not advertise them as working based on the local MVP.

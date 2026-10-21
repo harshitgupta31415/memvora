@@ -347,6 +347,8 @@ export const MemorySchema = object({
   summary: Type.String(),
   mode: Type.Union([Type.Literal('observed'), Type.Literal('ai')]),
   label: Type.String(),
+  representation: Type.Optional(Type.Union([Type.Literal('raw_event'), Type.Literal('summary')])),
+  processingStatus: Type.Optional(JobStatusSchema),
   outcome: Type.String(),
   createdAt: TimestampSchema,
   steps: Type.Array(object({ text: Type.String(), sourceIds: Type.Array(IdSchema) })),

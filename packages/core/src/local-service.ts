@@ -7,6 +7,7 @@ import type {
   CreateSessionNote,
   Dashboard,
   JobsQuery,
+  JobStatus,
   JobSummary,
   LocalContext,
   Memory,
@@ -329,6 +330,26 @@ export function deriveObservedMemory(event: CapturedEvent): Memory {
   };
 }
 
+/** An on-read projection of accepted evidence, independent of summary processing. */
+export function deriveRawEvidenceMemory(event: CapturedEvent, status?: JobStatus): Memory {
+  const observed = deriveObservedMemory(event);
+  const stage =
+    status === 'queued' || status === 'running' || status === 'failed'
+      ? `summary ${status}`
+      : 'stored summary unavailable';
+  return {
+    ...observed,
+    representation: 'raw_event',
+    ...(status ? { processingStatus: status } : {}),
+    label: `Captured event — ${stage}`,
+    uncertainty: [
+      'This result is derived on read from an original captured event; it is not a stored or model-generated summary. Reading it does not run enrichment.',
+      'Displayed output is an excerpt; inspect the original event for the full captured output.',
+      ...observed.uncertainty,
+    ],
+  };
+}
+
 export type EvidenceEnricher = (event: CapturedEvent) => Promise<Memory>;
 export async function runEnrichmentOnce(
   store: LocalEvidenceStore,
@@ -378,11 +399,13 @@ export class LocalMemvora {
     let rawNeighbors = false;
     const memoryForEvent = (event: CapturedEvent): Memory => {
       try {
-        return this.store.getMemory(context, event.eventId);
+        const memory = this.store.getMemory(context, event.eventId);
+        if (memory.representation === 'raw_event') rawNeighbors = true;
+        return memory;
       } catch (error) {
         if (!(error instanceof DomainError) || error.code !== 'NOT_FOUND') throw error;
         rawNeighbors = true;
-        return deriveObservedMemory(event);
+        return deriveRawEvidenceMemory(event);
       }
     };
     // Query around the actual source sequence, including matches outside the latest timeline page.
@@ -549,7 +572,9 @@ export class LocalMemvora {
                     ]
                   : []),
                 ...(rawNeighbors
-                  ? ['Some steps use direct observed evidence while enrichment is pending.']
+                  ? [
+                      'Some steps are derived directly from captured events because a stored summary is unavailable.',
+                    ]
                   : []),
                 ...(codeMatches.length
                   ? [
