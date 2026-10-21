@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import Type from 'typebox';
+import { Compile } from 'typebox/compile';
 import {
   AskRequestSchema,
   CreateRepositorySchema,
@@ -61,6 +62,7 @@ import {
 } from '@memvora/core';
 import type { EvidenceEnricher, LocalEvidenceStore } from '@memvora/core';
 
+const immutableEventBatch = Compile(EventBatchSchema);
 const localHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 function allowedHost(value: string | undefined): boolean {
   if (!value) return false;
@@ -396,7 +398,30 @@ export function buildApp(options: AppOptions = {}) {
   );
   app.post(
     '/v1/events/batch',
-    { schema: { body: EventBatchSchema, response: { 200: EventAckSchema } } },
+    {
+      schema: { body: EventBatchSchema, response: { 200: EventAckSchema } },
+      // Event JSON participates in immutable retry digests. Validation must never
+      // coerce null/scalars, insert defaults, strip fields or otherwise change it.
+      // This route has only a body validator; query routes retain normal coercion.
+      validatorCompiler: () => (data: unknown) => {
+        try {
+          if (immutableEventBatch.Check(data)) return { value: data };
+        } catch {
+          // Return a safe validation result, never schema diagnostics containing data.
+        }
+        return {
+          error: [
+            {
+              keyword: 'eventBatch',
+              instancePath: '',
+              schemaPath: '#',
+              params: {},
+              message: 'must match the immutable event-batch contract',
+            },
+          ],
+        };
+      },
+    },
     async (request) => ({
       acknowledgedEventIds: service.ingest(request.body.events),
       requestId: request.id,

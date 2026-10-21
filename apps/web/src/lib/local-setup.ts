@@ -153,3 +153,15 @@ export async function localBackupDetails() {
     }),
   };
 }
+
+export async function localCaptureRecoveryDetails() {
+  const paths = localSetupPaths();
+  const configuration = localRuntimeConfiguration();
+  return {
+    cliBuilt: await isFile(paths.cli),
+    listPrefix: `& node ${quotePowerShellArgument(paths.cli)}`,
+    syncPrefix: localCliCommand(['sync']),
+    syncConfigurationError: configuration.ok ? null : configuration.message,
+    externalCredential: configuration.ok && configuration.externalCredential,
+  };
+}

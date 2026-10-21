@@ -22,6 +22,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: '/settings', label: 'Settings' },
     { href: '/setup', label: 'Local setup' },
     { href: '/backups', label: 'Backup guide' },
+    { href: '/capture-recovery', label: 'Capture recovery' },
   ].find((item) => (item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)));
   return (
     <div className="app-shell">
@@ -84,7 +85,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/settings"
             onClick={() => setOpen(false)}
-            className={`nav-item ${pathname.startsWith('/settings') || pathname.startsWith('/backups') ? 'active' : ''}`}
+            className={`nav-item ${pathname.startsWith('/settings') || pathname.startsWith('/backups') || pathname.startsWith('/capture-recovery') ? 'active' : ''}`}
           >
             <Icon name="settings" size={19} />
             Settings

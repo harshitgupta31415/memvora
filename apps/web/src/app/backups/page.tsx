@@ -220,6 +220,9 @@ export default async function Backups({
             running database with a copied file. Use disposable test data for any restore rehearsal.
           </p>
           <div className={styles.links}>
+            <Link href="/capture-recovery" className="inline-link">
+              Inspect local capture outboxes <Icon name="arrow" size={13} />
+            </Link>
             <Link href="/setup" className="inline-link">
               Review local setup <Icon name="arrow" size={13} />
             </Link>
