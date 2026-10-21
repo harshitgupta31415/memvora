@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { loadLocalToken, resolveDataDir, SqliteEvidenceStore } from '@memvora/db';
-import { configuredEnricher } from '@memvora/enrichment';
+import { configuredEnricher, configuredSessionSynthesizer } from '@memvora/enrichment';
 import { buildApp } from './app.js';
 import { registerGitHubRoutes } from './integrations/github.js';
 import { configuredGitHubOAuth } from './integrations/github-oauth.js';
@@ -19,6 +19,7 @@ const dataDir = resolveDataDir();
 const token = loadLocalToken({ create: true, dataDir });
 const store = new SqliteEvidenceStore(resolve(dataDir, 'server.sqlite'));
 const enricher = configuredEnricher();
+const synthesis = configuredSessionSynthesizer();
 const githubOAuth = configuredGitHubOAuth(store, token);
 const app = buildApp({
   logger: true,
@@ -26,6 +27,7 @@ const app = buildApp({
   token,
   registerIntegrations: (instance, service) => registerGitHubRoutes(instance, service, githubOAuth),
   ...(enricher ? { enricher } : {}),
+  ...(synthesis ? { synthesis } : {}),
 });
 for (const signal of ['SIGINT', 'SIGTERM'] as const)
   process.once(signal, () => {

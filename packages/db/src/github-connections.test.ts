@@ -283,7 +283,7 @@ describe('durable scoped GitHub authorization', () => {
     reopened.close();
     const inspection = new DatabaseSync(path);
     try {
-      expect(inspection.prepare('PRAGMA user_version').get()?.['user_version']).toBe(8);
+      expect(inspection.prepare('PRAGMA user_version').get()?.['user_version']).toBe(9);
     } finally {
       inspection.close();
     }

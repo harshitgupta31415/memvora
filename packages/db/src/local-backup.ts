@@ -14,9 +14,9 @@ import { backup, DatabaseSync } from 'node:sqlite';
 
 export const LOCAL_BACKUP_MAX_BYTES = 512 * 1024 * 1024;
 const MANIFEST_MAX_BYTES = 32 * 1024;
-type BackupDatabaseSchema = 7 | 8;
+type BackupDatabaseSchema = 7 | 8 | 9;
 const supportedDatabaseSchema = (value: unknown): value is BackupDatabaseSchema =>
-  value === 7 || value === 8;
+  value === 7 || value === 8 || value === 9;
 const countQueries = {
   repositories: 'SELECT count(*) AS count FROM local_repositories',
   sessions: 'SELECT count(*) AS count FROM local_sessions',
@@ -304,9 +304,39 @@ function checkSchema(database: DatabaseSync): BackupDatabaseSchema {
     );
   const columnsByTable = {
     ...requiredColumns,
-    ...(version === 8 ? { local_event_fts: ['event_id', 'searchable_text'] } : {}),
+    ...(version >= 8 ? { local_event_fts: ['event_id', 'searchable_text'] } : {}),
+    ...(version >= 9
+      ? {
+          local_session_syntheses: [
+            'ordinal',
+            'id',
+            'workspace_id',
+            'user_id',
+            'repository_id',
+            'session_id',
+            'workspace_generation',
+            'repository_generation',
+            'session_generation',
+            'revision_json',
+            'input_hash',
+            'input_json',
+            'sources_json',
+            'configuration_json',
+            'configuration_fingerprint',
+            'status',
+            'attempts',
+            'created_at',
+            'started_at',
+            'finished_at',
+            'lease_token',
+            'lease_until',
+            'failure_code',
+            'analysis_json',
+          ],
+        }
+      : {}),
   };
-  const ftsTables = [...baseFtsTables, ...(version === 8 ? ['local_event_fts'] : [])];
+  const ftsTables = [...baseFtsTables, ...(version >= 8 ? ['local_event_fts'] : [])];
   const knownTables = new Set([
     ...Object.keys(columnsByTable),
     'sqlite_sequence',
@@ -404,6 +434,7 @@ function inspect(database: DatabaseSync): {
   for (const [table, column] of [
     ['local_event_intakes', 'id'],
     ['local_session_notes', 'ordinal'],
+    ...(schemaVersion >= 9 ? [['local_session_syntheses', 'ordinal'] as const] : []),
   ] as const) {
     const maximum = scalar(database, `SELECT coalesce(max(${column}),0) AS count FROM ${table}`);
     const sequence =
@@ -411,7 +442,7 @@ function inspect(database: DatabaseSync): {
     if (!integer(sequence) || sequence < maximum) throw invalid();
   }
   if (
-    schemaVersion === 8 &&
+    schemaVersion >= 8 &&
     (database
       .prepare(
         'SELECT 1 FROM local_event_fts f LEFT JOIN local_event_intakes i ON i.id=f.rowid AND i.event_id=f.event_id WHERE i.id IS NULL LIMIT 1',

@@ -35,6 +35,7 @@ const valid: Record<string, Record<string, unknown>> = {
   get_session_notes: { id, before: id, limit: 2 },
   get_session_handover: { id },
   get_session_recap: { id },
+  get_session_synthesis: { id, requestId: id },
   get_session_context: { id, cursor: 'opaque-history-cursor', limit: 2 },
 };
 

@@ -5,6 +5,7 @@ import {
   SearchResponseSchema,
   SessionEventsPageSchema,
   SessionRecapSchema,
+  SessionSynthesisResponseSchema,
   SessionHandoverSchema,
   SessionNoteResponseSchema,
   SessionNotesPageSchema,
@@ -16,6 +17,7 @@ import {
   type SearchResponse,
   type SessionEventsPage,
   type SessionRecap,
+  type SessionSynthesisResponse,
   type SessionHandover,
   type SessionNote,
   type SessionNotesPage,
@@ -28,6 +30,7 @@ import * as z from 'zod/v4';
 import { request, toolResult } from './client.js';
 import { buildSessionContextResult } from './session-context.js';
 import { buildSessionRecapResult } from './session-recap.js';
+import { buildSessionSynthesisResult } from './session-synthesis.js';
 import { buildSessionNotesResult, type SessionNoteSearchResult } from './session-notes.js';
 import { buildSessionHandoverPreview } from './session-handover.js';
 import { findSessions } from './session-directory.js';
@@ -291,6 +294,27 @@ serveStdio(() => {
         );
         if (report.session.id !== id) throw new Error('Handover returned an unexpected session.');
         return buildSessionHandoverPreview(report);
+      }),
+  );
+
+  server.registerTool(
+    'get_session_synthesis',
+    {
+      description:
+        'Read an existing optional AI interpretation and its queued/running/ready/failed/superseded status for one authorized investigation. Includes provider/model, original input hash, bounded coverage, canonical citations and a stale flag. Never requests synthesis, invokes a provider, retries a job, executes commands or changes evidence. Hypotheses and suggested checks remain unverified. A stale interpretation belongs to earlier input or configuration.',
+      inputSchema: z
+        .object({ id: z.string().uuid(), requestId: z.string().uuid().optional() })
+        .strict(),
+      annotations,
+    },
+    async ({ id, requestId }) =>
+      toolResult(async () => {
+        const query = requestId === undefined ? '' : `?${new URLSearchParams({ requestId })}`;
+        const value = await request<SessionSynthesisResponse>(
+          `/v1/sessions/${id}/synthesis${query}`,
+          SessionSynthesisResponseSchema,
+        );
+        return buildSessionSynthesisResult(value, id, requestId);
       }),
   );
 

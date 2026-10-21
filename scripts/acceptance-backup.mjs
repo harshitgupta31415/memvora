@@ -424,7 +424,7 @@ try {
   assert.equal(manifest.format, 'memvora-local-backup');
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.database.file, 'server.sqlite');
-  assert.equal(manifest.database.schemaVersion, 8);
+  assert.equal(manifest.database.schemaVersion, 9);
   const snapshotPath = join(backupDirectory, 'server.sqlite');
   const snapshotBytes = readFileSync(snapshotPath);
   safe(snapshotBytes);
@@ -653,7 +653,7 @@ try {
   const newer = duplicateBackup('newer-schema');
   const future = new DatabaseSync(join(newer, 'server.sqlite'));
   try {
-    future.exec('PRAGMA user_version=9');
+    future.exec('PRAGMA user_version=10');
   } finally {
     future.close();
   }

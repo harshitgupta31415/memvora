@@ -137,7 +137,7 @@ export async function packageClients() {
   if (!existsSync(runtimePath))
     throw new Error('Build shared packages before packaging the private clients.');
   const { CLIENT_VERSION } = await import(pathToFileURL(runtimePath).href);
-  if (CLIENT_VERSION !== '0.4.0')
+  if (CLIENT_VERSION !== '0.5.0')
     throw new Error('Built client version does not match the reviewed private package version.');
   for (const app of ['cli', 'mcp'])
     if (

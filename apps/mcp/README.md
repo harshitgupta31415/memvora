@@ -1,6 +1,6 @@
 # Local read-only MCP adapter
 
-Adapter version 0.4.0 can be installed with the CLI from a private local tarball. See [CLIENT_INSTALLATION.md](../../docs/CLIENT_INSTALLATION.md) for the direct Node launcher and explicit server credential configuration. The package works independently of source workspace links; source-development instructions below retain their existing application-root fallback.
+Adapter version 0.5.0 can be installed with the CLI from a private local tarball. See [CLIENT_INSTALLATION.md](../../docs/CLIENT_INSTALLATION.md) for the direct Node launcher and explicit server credential configuration. The package works independently of source workspace links; source-development instructions below retain their existing application-root fallback.
 
 This uses the official TypeScript MCP server SDK v2 and stdio transport. Registered tools:
 
@@ -12,12 +12,17 @@ This uses the official TypeScript MCP server SDK v2 and stdio transport. Registe
 - `get_repository_source`: reads a current or earlier retained source by `id`, with optional `startLine` and `limit` (up to 200 lines before tool excerpt limits).
 - `get_session_context`: reads bounded ordered execution/output/diff excerpts by session `id`; optional `cursor` and `limit` (1–10, default 5). Returns snapshot page metadata for older/newer navigation across the accepted history.
 - `get_session_recap`: reads a deterministic observed investigation recap by session `id`, with ordered command/outcome citations, coverage, counts, output/diff excerpts and uncertainty. It does not infer an engineer's intent, root cause or a causal fix.
+- `get_session_synthesis`: reads existing optional AI interpretation and status by session `id`, optionally selecting an original `requestId`. It never submits synthesis or calls a provider.
 - `get_session_handover`: reads a source manifest and compact handover preview by session `id`. `fullReportIncluded` is always false; use the website download or CLI export for the full portable report.
 - `search_session_notes`: searches authorized user-authored notes, decisions and resolution claims with optional `repositoryIds` and `limit` (1–10, default 5). An empty repository list returns no notes.
 - `get_session_note`: reads one authorized journal note by `id`, retaining its author, kind, timestamp, unverified label and linked event citations.
 - `get_session_notes`: reads the latest chronological journal page for session `id`, with optional `limit` (1–10, default 5) and `before` UUID from the previous `olderBeforeId`.
 
 After the root build, configure your MCP host to launch `node` with the absolute path to `apps/mcp/dist/index.js`. Use the direct executable rather than npm wrappers because stdout is reserved for protocol traffic. No tool executes commands or edits code. All retrieval calls use the same authenticated HTTP API as the website and CLI; the adapter never opens the database directly.
+
+Session synthesis is disabled by default and is explicitly requested through the website or CLI after reviewing provider/model, bounded coverage and input hash. `get_session_synthesis` only reads `GET /v1/sessions/:id/synthesis`; it cannot request, retry or regenerate analysis. Its response labels AI interpretation as unverified and retains queued/running/ready/failed/superseded status, the original request UUID/input hash, saved provider/model, coverage, source IDs, claim citation memberships and the `stale` flag. A stale result describes earlier evidence or configuration. There is at most one provider attempt per accepted request; repeating a read never creates another attempt. This interpretation remains separate from deterministic observed recaps and authored journal claims, and does not establish a causal fix or the engineer's private thinking.
+
+The synthesis presentation fits a 96 KiB escaped MCP content-envelope budget. All request metadata, sources and claim source memberships remain intact; readable claim and uncertainty text may be shortened at Unicode code-point boundaries, with `excerpted` and an evidence notice. Invalid session/request identity, canonical citation locators, coverage or claim closure fail closed. An absent request is reported as null, without inventing generated content.
 
 The API must be running. The adapter defaults to `http://127.0.0.1:4000`; override `MEMVORA_API_URL` only with a loopback origin. It reads `MEMVORA_LOCAL_TOKEN`, or `.memvora/local-token` under the application root, or `MEMVORA_DATA_DIR/local-token`. Never paste real tokens into a committed MCP configuration. This local trusted-machine credential is not production pairing, organization authorization or remote MCP OAuth.
 
