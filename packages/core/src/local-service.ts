@@ -402,34 +402,56 @@ export class LocalMemvora {
     const expanded: Memory[] = [];
     let rawNeighbors = false;
     const memoryForEvent = (event: CapturedEvent): Memory => {
-      try {
-        const memory = this.store.getMemory(context, event.eventId);
-        if (memory.representation === 'raw_event') rawNeighbors = true;
-        return memory;
-      } catch (error) {
-        if (!(error instanceof DomainError) || error.code !== 'NOT_FOUND') throw error;
-        rawNeighbors = true;
-        return deriveRawEvidenceMemory(event);
-      }
+      // getMemory already projects accepted raw evidence when no summary exists.
+      // A missing result therefore signals unavailable/deleted evidence, not an
+      // invitation to reconstruct a previously read event after access changed.
+      const memory = this.store.getMemory(context, event.eventId);
+      if (memory.representation === 'raw_event') rawNeighbors = true;
+      return memory;
     };
-    // Query around the actual source sequence, including matches outside the latest timeline page.
-    const groups = new Map<string, Map<string, CapturedEvent>>();
+    // Reserve direct matches before admitting context. Earlier windows must not crowd
+    // a later matching command out of its own answer, even within the same session.
+    const groups = new Map<string, { events: Map<string, CapturedEvent>; anchors: Set<string> }>();
+    const selected = new Set<string>();
     for (const match of matches.slice(0, 10)) {
       if (!groups.has(match.sessionId) && groups.size >= 3) continue;
-      const group = groups.get(match.sessionId) ?? new Map<string, CapturedEvent>();
+      const group = groups.get(match.sessionId) ?? {
+        events: new Map<string, CapturedEvent>(),
+        anchors: new Set<string>(),
+      };
       for (const event of this.store.neighborEvents(context, match.id, 3))
-        group.set(event.eventId, event);
+        group.events.set(event.eventId, event);
+      if (!group.events.has(match.id))
+        throw new DomainError('INVALID_RECALL_EVIDENCE', 'A matching command is unavailable.', 409);
+      group.anchors.add(match.id);
+      selected.add(match.id);
       groups.set(match.sessionId, group);
     }
-    for (const group of groups.values()) {
-      for (const event of [...group.values()].sort((a, b) => a.sequence - b.sequence)) {
-        if (expanded.length >= 10) break;
-        expanded.push(memoryForEvent(event));
+    const neighbors = [...groups.values()].map((group) => {
+      const sequences = [...group.anchors].map((id) => group.events.get(id)!.sequence);
+      const distance = (event: CapturedEvent) =>
+        Math.min(...sequences.map((sequence) => Math.abs(sequence - event.sequence)));
+      return [...group.events.values()]
+        .filter((event) => !selected.has(event.eventId))
+        .sort((a, b) => distance(a) - distance(b) || b.sequence - a.sequence);
+    });
+    // Give each selected investigation a turn; prefer close context and, on ties,
+    // later observations. Final display remains chronological within each session.
+    while (selected.size < 10 && neighbors.some((queue) => queue.length)) {
+      for (const queue of neighbors) {
+        if (selected.size >= 10) break;
+        const event = queue.shift();
+        if (event) selected.add(event.eventId);
       }
     }
-    for (const match of matches) {
-      if (expanded.length >= 10) break;
-      if (!expanded.some((item) => item.id === match.id)) expanded.push(match);
+    const evidenceShortened =
+      matches.some((match) => !selected.has(match.id)) ||
+      neighbors.some((queue) => queue.length > 0);
+    for (const group of groups.values()) {
+      for (const event of [...group.events.values()].sort((a, b) => a.sequence - b.sequence)) {
+        if (!selected.has(event.eventId)) continue;
+        expanded.push(memoryForEvent(event));
+      }
     }
     const recentPhrases = new Set([
       'what failed in my last investigation',
@@ -504,6 +526,17 @@ export class LocalMemvora {
         : modes.has('ai')
           ? ('ai' as const)
           : ('observed' as const);
+    const stepCounts = items.map((item) => Math.min(item.steps.length, 1));
+    let stepSlots =
+      30 - codeMatches.length - noteMatches.length - stepCounts.reduce((a, b) => a + b, 0);
+    while (stepSlots > 0 && items.some((item, index) => item.steps.length > stepCounts[index]!)) {
+      for (let index = 0; index < items.length && stepSlots > 0; index++) {
+        if (items[index]!.steps.length <= stepCounts[index]!) continue;
+        stepCounts[index] = stepCounts[index]! + 1;
+        stepSlots--;
+      }
+    }
+    const stepsShortened = items.some((item, index) => item.steps.length > stepCounts[index]!);
     return {
       status:
         items.length || codeMatches.length || noteMatches.length
@@ -529,9 +562,7 @@ export class LocalMemvora {
               : 'There is insufficient stored evidence matching this query in the selected repositories. Capture and sync an investigation, add a journal note, import repository context, or try the exact error, command, or code identifier.'
       }`,
       steps: [
-        ...items
-          .flatMap((item) => item.steps)
-          .slice(0, 30 - codeMatches.length - noteMatches.length),
+        ...items.flatMap((item, index) => item.steps.slice(0, stepCounts[index])),
         ...noteMatches.map((note) => {
           let body = note.body.slice(0, 1000);
           if (/[\uD800-\uDBFF]$/u.test(body)) body = body.slice(0, -1);
@@ -566,6 +597,16 @@ export class LocalMemvora {
           ? [
               ...new Set([
                 ...items.flatMap((item) => item.uncertainty),
+                ...(evidenceShortened
+                  ? [
+                      'Recall is bounded: it selects from the first ten ranked matches across at most three investigations, with a ten-command budget including nearby attempts. Some matching events or neighboring attempts were omitted; narrow the query or open the paged investigation history. Note-linked event citations can refer to additional commands.',
+                    ]
+                  : []),
+                ...(stepsShortened
+                  ? [
+                      'Displayed command steps were shortened to keep the answer bounded. Every selected command retains a cited step; open its original event for full retained evidence.',
+                    ]
+                  : []),
                 ...(noteMatches.length
                   ? [
                       'Journal entries are user-authored statements, not captured execution or independent verification. A resolution report can be mistaken, outdated or unsupported by its linked events.',

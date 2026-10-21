@@ -100,6 +100,7 @@ Run resource-intensive commands through `scripts/with-resource-limits.ps1`, as i
 | `npm run acceptance:clients`                                              | Install that artifact offline in an isolated folder and verify real capture, retry, Ask and MCP.                 |
 | `npm run worker:check`                                                    | Check local worker configuration syntax; it does not consume jobs.                                               |
 | `npm run acceptance:local`                                                | With the API running and services built, capture two labeled real error/fix fixtures and verify recall plus MCP. |
+| `npm run evaluate:retrieval`                                              | Evaluate a fixed synthetic relevance corpus through API, CLI and MCP after building packages/services.           |
 
 After changing shared packages, rebuild them or restart development so consumers use current compiled exports. Optional configuration can be copied from `.env.example` to ignored `.env`. Keep the same API/data-directory settings in the web app's local environment when overriding defaults; see the local guide.
 

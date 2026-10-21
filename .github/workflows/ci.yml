@@ -36,6 +36,7 @@ jobs:
       - run: npm run acceptance:backup
       - run: npm run acceptance:outbox
       - run: npm run acceptance:raw-recall
+      - run: npm run evaluate:retrieval
       - run: npm run package:clients
       - run: npm run acceptance:clients
 

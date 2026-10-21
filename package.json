@@ -45,6 +45,7 @@
     "acceptance:backup": "node scripts/acceptance-backup.mjs",
     "acceptance:outbox": "node scripts/acceptance-outbox.mjs",
     "acceptance:raw-recall": "node scripts/acceptance-raw-recall.mjs",
+    "evaluate:retrieval": "node scripts/evaluate-retrieval.mjs",
     "package:clients": "npm run build:packages && node scripts/package-clients.mjs",
     "acceptance:clients": "node scripts/acceptance-clients.mjs",
     "acceptance:github-oauth": "node scripts/acceptance-github-oauth.mjs"

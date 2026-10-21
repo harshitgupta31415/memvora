@@ -31,6 +31,8 @@ If a stored summary exists, it takes precedence, including when only the origina
 
 The normal application store upgrades to schema 8 and backfills its raw-evidence index from accepted events. For a recovery point before an upgrade, use [BACKUPS.md](BACKUPS.md); its operator supports schema 7 or 8 without upgrading the source. Implementation instructions and acceptance results remain separate; see [STATUS.md](STATUS.md).
 
+Long questions retain up to 64 distinct useful literals within the 2,000-character limit across command, file and note search. Use distinctive error text for dense or ambiguous questions; matching remains lexical. Ask reserves matching commands before nearby context and discloses any omitted events or shortened steps within its ten-command/three-investigation/30-step budget. [RETRIEVAL_EVALUATION.md](RETRIEVAL_EVALUATION.md) documents the reproducible synthetic corpus; it does not replace actual developer relevance judgments or real-provider evaluation.
+
 ### Find an older investigation
 
 The Investigations page searches the complete authorized session directory before limiting results. Use a literal title substring, repository and optional open/closed filter; it does not search command/error, journal or imported-code content. Use Ask for those evidence queries. Title matching normalizes Unicode to NFC and lowercase, with punctuation treated literally. The display is bounded to 200 characters; `titleTruncated` indicates that matching text may fall outside the shown prefix. Open/closed describes the investigation state, not whether a fix was verified.
