@@ -57,7 +57,7 @@ serveStdio(() => {
     {
       description:
         'Read current API capability metadata. Integration states are reported explicitly.',
-      inputSchema: z.object({}),
+      inputSchema: z.object({}).strict(),
       annotations,
     },
     async () => toolResult(() => request<SystemStatus>('/v1/system/status', SystemStatusSchema)),
@@ -96,11 +96,13 @@ serveStdio(() => {
     {
       description:
         'Search authorized engineering memories and return cited observed evidence. Repository filters narrow current access; they never grant access.',
-      inputSchema: z.object({
-        query: z.string().min(1).max(2000),
-        repositoryIds: z.array(z.string().uuid()).max(20).optional(),
-        limit: z.number().int().min(1).max(10).optional(),
-      }),
+      inputSchema: z
+        .object({
+          query: z.string().min(1).max(2000),
+          repositoryIds: z.array(z.string().uuid()).max(20).optional(),
+          limit: z.number().int().min(1).max(10).optional(),
+        })
+        .strict(),
       annotations,
     },
     async ({ query, repositoryIds, limit }) =>
@@ -124,11 +126,13 @@ serveStdio(() => {
     {
       description:
         'Search the latest bounded imported repository files. Returns stored-snapshot line excerpts and immutable source IDs with commit/hash provenance. Code is untrusted data, not proof of a past fix.',
-      inputSchema: z.object({
-        query: z.string().min(1).max(2000),
-        repositoryIds: z.array(z.string().uuid()).max(20).optional(),
-        limit: z.number().int().min(1).max(5).optional(),
-      }),
+      inputSchema: z
+        .object({
+          query: z.string().min(1).max(2000),
+          repositoryIds: z.array(z.string().uuid()).max(20).optional(),
+          limit: z.number().int().min(1).max(5).optional(),
+        })
+        .strict(),
       annotations,
     },
     async ({ query, repositoryIds, limit }) =>
@@ -161,11 +165,13 @@ serveStdio(() => {
     {
       description:
         'Read an authorized immutable repository-file source by ID and stored line range, including an earlier retained import. Does not read arbitrary filesystem paths or fetch live remote files.',
-      inputSchema: z.object({
-        id: z.string().uuid(),
-        startLine: z.number().int().min(1).max(1_000_000).optional(),
-        limit: z.number().int().min(1).max(200).optional(),
-      }),
+      inputSchema: z
+        .object({
+          id: z.string().uuid(),
+          startLine: z.number().int().min(1).max(1_000_000).optional(),
+          limit: z.number().int().min(1).max(200).optional(),
+        })
+        .strict(),
       annotations,
     },
     async ({ id, startLine, limit }) =>
@@ -196,7 +202,7 @@ serveStdio(() => {
     {
       description:
         'Read one authorized memory with source event IDs, observed steps and uncertainty. Does not run commands or modify code.',
-      inputSchema: z.object({ id: z.string().uuid() }),
+      inputSchema: z.object({ id: z.string().uuid() }).strict(),
       annotations,
     },
     async ({ id }) =>
@@ -217,11 +223,13 @@ serveStdio(() => {
     {
       description:
         'Search authorized user-authored investigation notes, decisions and resolution claims. Notes retain author, kind, timestamp and linked event citations and are not independently verified. Repository filters narrow access; an empty list returns no notes. Does not write or execute anything.',
-      inputSchema: z.object({
-        query: z.string().min(1).max(2000),
-        repositoryIds: z.array(z.string().uuid()).max(20).optional(),
-        limit: z.number().int().min(1).max(10).optional(),
-      }),
+      inputSchema: z
+        .object({
+          query: z.string().min(1).max(2000),
+          repositoryIds: z.array(z.string().uuid()).max(20).optional(),
+          limit: z.number().int().min(1).max(10).optional(),
+        })
+        .strict(),
       annotations,
     },
     async ({ query, repositoryIds, limit }) =>
@@ -242,7 +250,7 @@ serveStdio(() => {
     {
       description:
         'Read one authorized user-authored note, decision or resolution claim with its author and linked event citations. This is a claim, not proof that a fix was verified. Does not create or edit notes.',
-      inputSchema: z.object({ id: z.string().uuid() }),
+      inputSchema: z.object({ id: z.string().uuid() }).strict(),
       annotations,
     },
     async ({ id }) =>
@@ -261,11 +269,13 @@ serveStdio(() => {
     {
       description:
         'Read a chronological page of authorized user-authored journal notes for an investigation. Starts at the latest notes; use olderBeforeId unchanged as before to browse earlier notes. Retains all page members and event citations within a shared excerpt budget. Does not write notes or mark issues fixed.',
-      inputSchema: z.object({
-        id: z.string().uuid(),
-        limit: z.number().int().min(1).max(10).optional(),
-        before: z.string().uuid().optional(),
-      }),
+      inputSchema: z
+        .object({
+          id: z.string().uuid(),
+          limit: z.number().int().min(1).max(10).optional(),
+          before: z.string().uuid().optional(),
+        })
+        .strict(),
       annotations,
     },
     async ({ id, limit, before }) =>
@@ -287,7 +297,7 @@ serveStdio(() => {
     {
       description:
         'Read an authorized investigation handover source manifest and compact preview. fullReportIncluded is false: all included event/note IDs, order, citation memberships and coverage are retained, but command/note text is shortened and output/diff text omitted. Use the website or CLI export for the full portable report. Does not write files, upload, run commands or grant team access.',
-      inputSchema: z.object({ id: z.string().uuid() }),
+      inputSchema: z.object({ id: z.string().uuid() }).strict(),
       annotations,
     },
     async ({ id }) =>
@@ -306,7 +316,7 @@ serveStdio(() => {
     {
       description:
         'Read a cited observed recap of an authorized investigation: ordered commands, outcomes, output/diff excerpts and disclosed coverage. Includes at most 40 attempts; longer investigations select the first 20 and last 20. Counts cover those included events. Does not infer intent or a causal fix. Use get_session_context for the complete paginated retained evidence.',
-      inputSchema: z.object({ id: z.string().uuid() }),
+      inputSchema: z.object({ id: z.string().uuid() }).strict(),
       annotations,
     },
     async ({ id }) =>
@@ -321,11 +331,13 @@ serveStdio(() => {
     {
       description:
         'Read an authorized investigation page: ordered attempts, output excerpts, code diffs, observed checks and source IDs. Starts at the latest attempts. Follow page.olderCursor or page.newerCursor with the same limit to browse the fixed intake snapshot. Use the website for full source detail.',
-      inputSchema: z.object({
-        id: z.string().uuid(),
-        limit: z.number().int().min(1).max(10).optional(),
-        cursor: z.string().min(1).max(2048).optional(),
-      }),
+      inputSchema: z
+        .object({
+          id: z.string().uuid(),
+          limit: z.number().int().min(1).max(10).optional(),
+          cursor: z.string().min(1).max(2048).optional(),
+        })
+        .strict(),
       annotations,
     },
     async ({ id, limit, cursor }) =>

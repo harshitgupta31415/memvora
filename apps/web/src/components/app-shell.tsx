@@ -17,9 +17,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const isSourceView = pathname.startsWith('/sources/');
-  const current = [...navigation, { href: '/settings', label: 'Settings' }].find((item) =>
-    item.href === '/' ? pathname === '/' : pathname.startsWith(item.href),
-  );
+  const current = [
+    ...navigation,
+    { href: '/settings', label: 'Settings' },
+    { href: '/setup', label: 'Local setup' },
+  ].find((item) => (item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)));
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
@@ -85,6 +87,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <Icon name="settings" size={19} />
             Settings
+          </Link>
+          <Link
+            href="/setup"
+            onClick={() => setOpen(false)}
+            className={`nav-item ${pathname.startsWith('/setup') ? 'active' : ''}`}
+            aria-current={pathname.startsWith('/setup') ? 'page' : undefined}
+          >
+            <Icon name="terminal" size={19} />
+            Local setup
           </Link>
           <div className="local-mode">
             <span />

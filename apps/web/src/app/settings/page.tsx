@@ -1,5 +1,7 @@
+import Link from 'next/link';
 import { GitHubStatusSchema, MeSchema, SettingsSchema } from '@memvora/contracts';
 import { apiRequest } from '@/lib/api';
+import { localDoctorCommand } from '@/lib/local-setup';
 import { Icon } from '@/components/icon';
 import { ErrorState, PageHeading } from '@/components/ui';
 import { CopyCommand, RefreshButton } from '@/components/controls';
@@ -170,11 +172,14 @@ export default async function Settings({
                 <span>Local stdio adapter over the same evidence API</span>
               </li>
             </ul>
-            <CopyCommand command="npm run doctor" />
+            <CopyCommand command={localDoctorCommand()} />
             <p className="settings-help">
-              Run diagnostics from the project root. For supported configuration and setup, use the
-              maintained project README. Credentials are managed outside the browser.
+              Diagnostics use this terminal’s environment and the root configuration file.
+              Credentials are managed outside the browser.
             </p>
+            <Link href="/setup" className="inline-link">
+              Set up the CLI and read-only MCP <Icon name="arrow" size={13} />
+            </Link>
           </section>
         </div>
       )}

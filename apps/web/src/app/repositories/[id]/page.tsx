@@ -8,6 +8,7 @@ import {
   SessionListSchema,
 } from '@memvora/contracts';
 import { apiRequest } from '@/lib/api';
+import { localCliCommand } from '@/lib/local-setup';
 import { Icon } from '@/components/icon';
 import { DateLabel, EmptyState, ErrorState, PageHeading, SectionHeading } from '@/components/ui';
 import { SessionRow } from '@/components/evidence';
@@ -31,6 +32,7 @@ export default async function RepositoryDetail({ params }: { params: Promise<{ i
     return <ErrorState message={repositoryResult.message} />;
   }
   const { repository } = repositoryResult.data;
+  const initCommand = localCliCommand(['init', '--repository-id', repository.id]);
   const imported = context.ok ? context.data.context : null;
   const investigations = sessions.ok
     ? sessions.data.items.filter((session) => session.repositoryId === id)
@@ -140,13 +142,22 @@ export default async function RepositoryDetail({ params }: { params: Promise<{ i
           <section className="panel section-padding">
             <SectionHeading
               title="Capture into this project"
-              description="Use this explicit binding from the project root."
+              description="Run the CLI from your actual target repository folder."
             />
-            <CopyCommand command={`npm run cli -- init --repository-id ${repository.id}`} />
+            {initCommand ? (
+              <CopyCommand command={initCommand} />
+            ) : (
+              <p className="settings-help">
+                Correct the local tool configuration in the setup guide before binding.
+              </p>
+            )}
             <p className="muted-caption">
-              Then capture an actual command with the CLI. These instructions do not execute
-              anything in the browser.
+              Build the CLI first. A matching valid binding is reused; a different existing binding
+              is refused. Copying instructions does not execute them.
             </p>
+            <Link href={`/setup?repositoryId=${repository.id}`} className="inline-link">
+              Set up this repository <Icon name="arrow" size={13} />
+            </Link>
           </section>
           <section className="panel section-padding">
             <SectionHeading title="Repository provenance" />

@@ -3,7 +3,7 @@ import { DashboardSchema, RepositoryListSchema } from '@memvora/contracts';
 import { apiRequest } from '@/lib/api';
 import { Icon, type IconName } from '@/components/icon';
 import { EmptyState, ErrorState, PageHeading, SectionHeading } from '@/components/ui';
-import { CopyCommand, RefreshButton } from '@/components/controls';
+import { RefreshButton } from '@/components/controls';
 import { SessionRow } from '@/components/evidence';
 
 export const dynamic = 'force-dynamic';
@@ -82,8 +82,8 @@ export default async function Overview() {
                   Bind a repository, capture a real command with the CLI, and come back here to
                   trace what happened. Successful and failed attempts both belong in the story.
                 </p>
-                <Link className="inline-link" href="/repositories">
-                  Set up your first repository <Icon name="arrow" size={14} />
+                <Link className="inline-link" href="/setup">
+                  Set up local capture <Icon name="arrow" size={14} />
                 </Link>
               </div>
             </section>
@@ -149,8 +149,12 @@ export default async function Overview() {
                   <span className="step-index">01</span>
                   <div>
                     <h3>Bind your repository</h3>
-                    <p>Use the CLI from your project folder to establish its local binding.</p>
-                    <CopyCommand command="npm run cli -- init" />
+                    <p>
+                      Open your actual codebase in PowerShell and use its explicit local binding.
+                    </p>
+                    <Link href="/setup" className="inline-link">
+                      Open the setup guide <Icon name="arrow" size={12} />
+                    </Link>
                   </div>
                 </li>
                 <li>
@@ -158,7 +162,6 @@ export default async function Overview() {
                   <div>
                     <h3>Capture real work</h3>
                     <p>Commands, output, errors, and code conditions become recorded evidence.</p>
-                    <CopyCommand command="npm run cli -- run -- npm test" />
                   </div>
                 </li>
                 <li>
@@ -170,8 +173,8 @@ export default async function Overview() {
                 </li>
               </ol>
               <p className="muted-caption">
-                Run these starter commands from the project root. Capture is explicit; commands run
-                elsewhere are not monitored.
+                The setup guide supplies absolute CLI commands for a different target repository.
+                Capture is explicit; commands outside the wrapper are not monitored.
               </p>
             </aside>
           </div>

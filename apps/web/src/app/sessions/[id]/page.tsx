@@ -10,6 +10,7 @@ import {
 } from '@memvora/contracts';
 import type { SessionEventsPage } from '@memvora/contracts';
 import { apiRequest } from '@/lib/api';
+import { localCliCommand } from '@/lib/local-setup';
 import { Icon } from '@/components/icon';
 import {
   DateLabel,
@@ -182,6 +183,13 @@ export default async function Investigation({
     );
   }
   const { session, events, memories, page } = result.data;
+  const terminalCommand = localCliCommand([
+    'session',
+    'show',
+    session.id,
+    '--limit',
+    String(limit),
+  ]);
   const repository = await apiRequest(
     `/v1/repositories/${encodeURIComponent(session.repositoryId)}`,
     RepositoryResponseSchema,
@@ -439,11 +447,21 @@ export default async function Investigation({
           </section>
           <section className="panel section-padding">
             <SectionHeading title="Continue in the terminal" />
-            <CopyCommand command={`npm run cli -- session show ${session.id} --limit ${limit}`} />
+            {terminalCommand ? (
+              <CopyCommand command={terminalCommand} />
+            ) : (
+              <p className="settings-help">
+                Correct the local tool configuration before opening this investigation in the
+                terminal.
+              </p>
+            )}
             <p className="muted-caption">
               Starts a fresh latest page for this investigation. Follow the returned cursors to
               browse the same captured-event snapshot.
             </p>
+            <Link href={`/setup?repositoryId=${session.repositoryId}`} className="inline-link">
+              Set up local tools <Icon name="arrow" size={13} />
+            </Link>
           </section>
         </aside>
       </div>

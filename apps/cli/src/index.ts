@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { basename, join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import type {
   EventAck,
   LocalContext,
   RecallAnswer,
-  Repository,
   Session,
   SessionEventsPage,
 } from '@memvora/contracts';
@@ -22,7 +21,8 @@ import {
   writeBinding,
   type Binding,
 } from './local.js';
-import { captureCommand, gitText, recoverIncomplete } from './capture.js';
+import { captureCommand, recoverIncomplete } from './capture.js';
+import { initializeRepository } from './initialization.js';
 import { formatSessionRecap, readSessionRecap } from './session-recap.js';
 import {
   readSessionDirectory,
@@ -169,44 +169,27 @@ program
 program
   .command('init')
   .description(
-    'Register this local repository and create an initial investigation session. GitHub access is separate.',
+    'Initialize a new local capture or verify an existing binding without changing its investigation.',
   )
   .option('--repository-id <id>', 'Bind an existing authorized local repository ID')
   .action(async (options: { repositoryId?: string }) => {
-    const gitRoot = await gitText(process.cwd(), ['rev-parse', '--show-toplevel']);
-    const root = gitRoot.ok ? resolve(gitRoot.text.trim()) : process.cwd();
-    const remote = await gitText(root, ['remote', 'get-url', 'origin']);
-    let remoteUrl = remote.text.trim();
-    if (/^https?:\/\//i.test(remoteUrl)) {
-      const safeRemote = new URL(remoteUrl);
-      safeRemote.username = '';
-      safeRemote.password = '';
-      remoteUrl = safeRemote.toString();
-    }
-    const { origin, token } = connection();
-    let repository: Repository;
-    if (options.repositoryId) {
-      const result = await apiRequest<{ items: Repository[] }>(origin, token, '/v1/repositories');
-      const existing = result.items.find((item) => item.id === options.repositoryId);
-      if (!existing) throw new Error('Repository is not available to this local API credential.');
-      repository = existing;
-    } else {
-      const result = await apiRequest<{ repository: Repository }>(
-        origin,
-        token,
-        '/v1/repositories',
-        { name: basename(root), localPath: root, ...(remote.ok && remoteUrl ? { remoteUrl } : {}) },
+    const globalOptions = program.opts<{ apiUrl?: string; home?: string }>();
+    const result = await initializeRepository({ ...options, ...globalOptions });
+    if (result.mode === 'existing') {
+      console.log(
+        `Existing binding verified for repository ${result.binding.repositoryId}. Configuration, current investigation and local evidence were preserved.`,
       );
-      repository = result.repository;
+      if (result.sessionStatus === 'closed')
+        console.log(
+          'The bound investigation remains closed. Use memvora session start to begin another investigation.',
+        );
+      else if (result.sessionStatus === null)
+        console.log('No investigation is currently bound. Use memvora session start to begin one.');
+    } else {
+      console.log(
+        `Bound ${result.root} to local repository ${result.binding.repositoryId}; session ${result.binding.sessionId}.`,
+      );
     }
-    const binding = await createSession(
-      root,
-      { schemaVersion: 1, repositoryId: repository.id, apiUrl: origin },
-      'Initial investigation',
-    );
-    console.log(
-      `Bound ${root} to local repository ${repository.id}; session ${binding.sessionId}.`,
-    );
     console.log(
       'Capture data is stored in .memvora. Keep this directory excluded from version control. GitHub authorization is not implied.',
     );

@@ -18,7 +18,9 @@ const store = new SqliteEvidenceStore(':memory:');
 const service = new LocalMemvora(store);
 const app = buildApp({ store, token, embeddedWorker: false });
 let directoryRequests = 0;
+let apiRequests = 0;
 app.addHook('onRequest', async (request) => {
+  apiRequests++;
   if (request.url.startsWith('/v1/sessions/search') || request.url.startsWith('/v1/repositories'))
     directoryRequests++;
 });
@@ -324,6 +326,19 @@ try {
   assert.ok(
     tools.tools.some((tool) => tool.name === 'find_sessions' && tool.annotations?.readOnlyHint),
   );
+  const beforeUnknownToolOptions = apiRequests;
+  for (const definition of tools.tools) {
+    const properties = definition.inputSchema.properties ?? {};
+    const input = {
+      ...(properties.id ? { id: oldest.id } : {}),
+      ...(properties.query ? { query: 'DirectoryAcceptanceNeedle' } : {}),
+      unknownOptionMustBeRejected: true,
+    };
+    const result = await call('tools/call', { name: definition.name, arguments: input });
+    safe(JSON.stringify(result));
+    assert.equal(result.isError, true, `${definition.name} silently ignored an unknown option.`);
+  }
+  assert.equal(apiRequests, beforeUnknownToolOptions, 'Unknown MCP options reached the API.');
   const beforeRejectedToolFilters = directoryRequests;
   for (const invalid of [
     { repository: archive.id },
@@ -539,6 +554,7 @@ try {
       'compiled_cli_pages',
       'actual_read_only_stdio_mcp',
       'unknown_mcp_filters_rejected_before_api',
+      'all_mcp_tools_reject_unknown_options_before_api',
       'changed_cursor_scope_rejected',
       'malformed_url_recovery',
       'inert_hostile_title',

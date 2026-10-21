@@ -39,6 +39,7 @@
     "acceptance:recap": "node scripts/acceptance-recap.mjs",
     "acceptance:journal": "node scripts/acceptance-journal.mjs",
     "acceptance:directory": "node scripts/acceptance-directory.mjs",
+    "acceptance:setup": "node scripts/acceptance-setup.mjs",
     "acceptance:github-oauth": "node scripts/acceptance-github-oauth.mjs"
   },
   "devDependencies": {

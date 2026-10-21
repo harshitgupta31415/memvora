@@ -12,6 +12,8 @@ Investigations keep captured attempts separate from attributed notes, decisions 
 
 Investigation discovery applies title, repository and open/closed filters on the server before limiting results. Older pages remain available through the website, `memvora session list` and MCP `find_sessions`; title search is separate from Ask's evidence-content retrieval.
 
+The local [setup guide](http://127.0.0.1:3000/setup) generates PowerShell commands for capturing another repository and a read-only MCP configuration using this installation's absolute paths. Repeating `init` verifies an existing binding without replacing its investigation or local outbox. A different repository/API selector requires deliberate separate setup; initialization never silently rebinds stored captures.
+
 ## Start locally
 
 Use Node.js **24** or **26**, and npm **11 or later**. Open PowerShell in this folder:
@@ -83,7 +85,7 @@ Run resource-intensive commands through `scripts/with-resource-limits.ps1`, as i
 | `npm run build`                                                           | Compile shared packages/services and build the website. A build does not make local auth production-ready.       |
 | `npm run doctor`                                                          | Inspect prerequisites without printing credentials.                                                              |
 | `npm run cli -- --help`                                                   | List actual CLI commands.                                                                                        |
-| `npm run cli -- init`                                                     | Register and bind the current local repository; create an initial session.                                       |
+| `npm run cli -- init`                                                     | Initialize a new local binding, or verify an existing one without replacing its investigation/outbox.            |
 | `npm run cli -- run -- <command> [args...]`                               | Capture a supported explicit command.                                                                            |
 | `npm run cli -- sync`                                                     | Retry pending evidence without changing event identity.                                                          |
 | `npm run cli -- ask <question>`                                           | Retrieve cited evidence for the bound repository.                                                                |

@@ -131,7 +131,11 @@ In a second terminal from the project root:
 .\scripts\with-resource-limits.ps1 npm.cmd run cli -- run -- npm test
 ```
 
-`login` verifies the existing local development token; it does not open an OAuth/device approval flow. `init` explicitly registers the local repository and creates its first session. It reads a Git remote where available but does not thereby authorize a GitHub App. A local folder without a commit has `commitSha: null` with unavailable metadata reported.
+`login` verifies the existing local development token; it does not open an OAuth/device approval flow. First-time `init` explicitly registers the local repository and creates its first session. Repeating it verifies the existing authorized repository and current session without changing the binding file or opening/resetting the outbox. A closed current session stays closed; use `session start` for new work. A repository-only binding remains repository-only. An invalid binding, denied/deleted repository, mismatched repository selector or conflicting API origin fails without replacing local data. `--repository-id` uses exact authorized lookup rather than the recent repository list. Initialization reads a Git remote where available but does not thereby authorize a GitHub App. A local folder without a commit has `commitSha: null` with unavailable metadata reported.
+
+Open `http://127.0.0.1:3000/setup` for commands with the actual installation paths and a read-only MCP host configuration. The guide reports whether the CLI/MCP build files exist and verifies local API connectivity. Repository detail pages link to an authorized scoped version. Copy the PowerShell commands into a terminal in your actual target repository; they do not depend on that project defining Memvora npm scripts. The guide reads no environment-file contents and includes no token values.
+
+First-ever initialization still spans server creation and an exclusive local config write. A network failure or competing initialization can leave a created repository/session before the local write succeeds. Existing bindings are preserved; this is not a cross-process, server-wide idempotency guarantee. Keep pending evidence and investigate the failed setup instead of deleting the outbox or editing captured UUID/sequence values.
 
 To capture an external project, build the services once through the resource wrapper, change into that project, and invoke the absolute CLI path:
 
@@ -282,7 +286,7 @@ Build services, then configure the MCP host to launch direct Node with the absol
 
 Host configuration details vary by client. Available tools include `memvora_status`, `search_memory(query, repositoryIds?, limit?)`, `get_memory(id)`, `get_session_context(id, cursor?, limit?)` and the read-only `get_session_handover` preview, plus the imported-source tools described in the adapter guide. They use the API, retain source IDs and return bounded excerpts. Session context returns snapshot page metadata so earlier work can be retrieved through `olderCursor` instead of stopping at 100 events. No tool runs commands or edits code. Diagnostic output uses stderr. See [the adapter guide](../apps/mcp/README.md).
 
-For custom configuration, set `MEMVORA_API_URL` and the absolute `MEMVORA_DATA_DIR` in the MCP server environment. The adapter does not load the root `.env`. If the API uses an explicit `MEMVORA_LOCAL_TOKEN` override, provide that same value through the host's private environment/secret settings; never commit it in the JSON configuration.
+For custom configuration, set `MEMVORA_API_URL` and the absolute `MEMVORA_DATA_DIR` in the MCP server environment. The adapter itself does not load the root `.env`; the setup guide's generated Node launch arguments explicitly load that optional file. If an explicit token override is supplied outside that file, provide the same value through the host's private environment/secret settings; never commit it in the JSON configuration. All tool input schemas reject unknown fields before API access, so a misspelled selector cannot silently widen a search.
 
 ## 10. Current local routes versus hosted target
 
