@@ -15,9 +15,9 @@ Use the developer's existing Git author and GitHub identity. The GitHub username
 
 ## Pull requests and merging
 
-The user requires pull requests for project changes and authorizes creating and merging them without asking again. Keep the repository private. Use `main` as the integration branch and `harshitgupta31415/<descriptive-name>` for feature branches; do not push feature changes directly to `main`.
+The user requires pull requests for project changes and authorizes creating and merging them without asking again. Keep the repository private. Use `harshitgupta31415/main` as the integration branch and `harshitgupta31415/<descriptive-name>` for feature branches; do not push feature changes directly to the integration branch.
 
-Before merging, inspect the complete diff, run the checks appropriate to the change, and wait for every required CI job on the latest PR revision. Describe the resulting behavior, validation and material limits in the PR. Merge only the reviewed head commit after checks pass; do not bypass failed checks, repository protections or unresolved material findings. Then synchronize the local `main` branch without overwriting uncommitted work. Report the PR link and merge result. If GitHub permissions or a failing prerequisite block the merge, state the actual blocker rather than silently using direct pushes.
+Before merging, inspect the complete diff, run the checks appropriate to the change, and wait for every required CI job on the latest PR revision. Describe the resulting behavior, validation and material limits in the PR. Merge only the reviewed head commit after checks pass; do not bypass failed checks, repository protections or unresolved material findings. Then synchronize the local integration branch without overwriting uncommitted work. Report the PR link and merge result. If GitHub permissions or a failing prerequisite block the merge, state the actual blocker rather than silently using direct pushes.
 
 ## Implementing a change
 

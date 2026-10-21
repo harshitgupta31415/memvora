@@ -143,7 +143,7 @@ This requires `npm run build` first. Open `http://127.0.0.1:3000`; API port is 4
 
 Local database, credential and captured fixtures live in the ignored `.memvora` folder. Do not delete it to resolve an unrelated build issue. Rebuilding leaves history intact. CLI captures another repository using the direct Node entry point described in `LOCAL_MVP.md`.
 
-Private repository: [harshitgupta31415/memvora-vips-cosmic](https://github.com/harshitgupta31415/memvora-vips-cosmic). Keep it private. `main` is the integration branch; changes use `harshitgupta31415/<descriptive-name>` branches and pull requests. The user authorizes creating and merging PRs after the latest revision's CI passes, without another approval request. Commits and PRs use the existing developer identity. See the working agreement and [AI_WORKFLOW.md](AI_WORKFLOW.md).
+Private repository: [harshitgupta31415/memvora-vips-cosmic](https://github.com/harshitgupta31415/memvora-vips-cosmic). Keep it private. `harshitgupta31415/main` is the integration branch; changes use `harshitgupta31415/<descriptive-name>` branches and pull requests. The user authorizes creating and merging PRs after the latest revision's CI passes, without another approval request. Commits and PRs use the existing developer identity. See the working agreement and [AI_WORKFLOW.md](AI_WORKFLOW.md).
 
 ## Next implementation work
 

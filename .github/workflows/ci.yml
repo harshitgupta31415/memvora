@@ -2,9 +2,9 @@ name: Project checks
 
 on:
   push:
-    branches: [main]
+    branches: [harshitgupta31415/main]
   pull_request:
-    branches: [main]
+    branches: [harshitgupta31415/main]
   workflow_dispatch:
 
 permissions:
