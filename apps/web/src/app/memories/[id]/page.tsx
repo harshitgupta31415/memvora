@@ -5,6 +5,7 @@ import { apiRequest } from '@/lib/api';
 import { Icon } from '@/components/icon';
 import { DateLabel, ErrorState, PageHeading, SectionHeading, StatusBadge } from '@/components/ui';
 import { SourceLinks, SourceList } from '@/components/evidence';
+import { RawMemoryNotice } from '@/components/raw-memory-notice';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,7 @@ export default async function MemoryDetail({ params }: { params: Promise<{ id: s
     return <ErrorState message={result.message} />;
   }
   const { memory } = result.data;
+  const raw = memory.representation === 'raw_event';
   return (
     <>
       <Link href={`/sessions/${memory.sessionId}`} className="back-link">
@@ -23,11 +25,16 @@ export default async function MemoryDetail({ params }: { params: Promise<{ id: s
         Back to investigation
       </Link>
       <PageHeading
-        eyebrow="LINKED MEMORY"
+        eyebrow={raw ? 'CAPTURED COMMAND EVIDENCE' : 'LINKED MEMORY'}
         title={memory.title}
-        description="A traceable reconstruction of recorded work. Follow each source back to the original command."
+        description={
+          raw
+            ? 'Recall from the original accepted command while a stored summary is unavailable.'
+            : 'A traceable reconstruction of recorded work. Follow each source back to the original command.'
+        }
         action={<StatusBadge status={memory.outcome} />}
       />
+      <RawMemoryNotice memory={memory} />
       <div className="two-column">
         <article className="panel answer-panel" style={{ marginTop: 0 }}>
           <span className="memory-label">{memory.label}</span>
@@ -60,7 +67,7 @@ export default async function MemoryDetail({ params }: { params: Promise<{ id: s
           />
           <SourceList sources={memory.sources} />
           <p className="muted-caption">
-            Created <DateLabel value={memory.createdAt} />
+            {raw ? 'Evidence timestamp' : 'Created'} <DateLabel value={memory.createdAt} />
             <br />
             Mode: {memory.mode}. The recorded sources remain authoritative.
           </p>

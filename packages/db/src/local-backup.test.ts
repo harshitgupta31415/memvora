@@ -144,6 +144,71 @@ function rewriteManifest(directory: string, change: (value: Record<string, unkno
 }
 
 describe('local same-instance SQLite snapshots', () => {
+  it('keeps schema-7 snapshots independently verifiable without migrating either copy', async () => {
+    const f = fixture();
+    f.store.close();
+    const source = join(f.dataDirectory, 'server.sqlite');
+    const legacy = new DatabaseSync(source);
+    try {
+      legacy.exec(
+        'DROP TRIGGER local_event_fts_delete; DROP TABLE local_event_fts; PRAGMA user_version=7;',
+      );
+    } finally {
+      legacy.close();
+    }
+    const before = readFileSync(source);
+    const result = await createLocalBackup({
+      dataDirectory: f.dataDirectory,
+      outputDirectory: f.outputDirectory,
+    });
+    expect(result.manifest.database.schemaVersion).toBe(7);
+    expect((await verifyLocalBackup(f.outputDirectory)).database.schemaVersion).toBe(7);
+    expect(readFileSync(source)).toEqual(before);
+    readDatabase(join(f.outputDirectory, 'server.sqlite'), (database) => {
+      expect(database.prepare('PRAGMA user_version').get()?.['user_version']).toBe(7);
+      expect(
+        database.prepare("SELECT name FROM sqlite_schema WHERE name='local_event_fts'").get(),
+      ).toBeUndefined();
+    });
+  });
+
+  it('validates schema-8 raw-index membership and the manifest database version', async () => {
+    const f = fixture();
+    const result = await createLocalBackup({
+      dataDirectory: f.dataDirectory,
+      outputDirectory: f.outputDirectory,
+    });
+    expect(result.manifest.database.schemaVersion).toBe(8);
+    expect((await verifyLocalBackup(f.outputDirectory)).database.schemaVersion).toBe(8);
+    rewriteManifest(f.outputDirectory, (value) => {
+      (value['database'] as Record<string, unknown>)['schemaVersion'] = 7;
+    });
+    await expect(verifyLocalBackup(f.outputDirectory)).rejects.toMatchObject({
+      code: 'BACKUP_INVALID',
+    });
+    rewriteManifest(f.outputDirectory, (value) => {
+      (value['database'] as Record<string, unknown>)['schemaVersion'] = 8;
+    });
+    const path = join(f.outputDirectory, 'server.sqlite');
+    const changed = new DatabaseSync(path);
+    try {
+      changed.exec(
+        'DELETE FROM local_event_fts WHERE rowid=(SELECT min(rowid) FROM local_event_fts)',
+      );
+    } finally {
+      changed.close();
+    }
+    const bytes = readFileSync(path);
+    rewriteManifest(f.outputDirectory, (value) => {
+      const database = value['database'] as Record<string, unknown>;
+      database['byteLength'] = bytes.length;
+      database['sha256'] = createHash('sha256').update(bytes).digest('hex');
+    });
+    await expect(verifyLocalBackup(f.outputDirectory)).rejects.toMatchObject({
+      code: 'BACKUP_INVALID',
+    });
+  });
+
   it('captures committed WAL evidence and private state without changing the live database or copying external credentials', async () => {
     const f = fixture();
     const source = join(f.dataDirectory, 'server.sqlite');
@@ -301,7 +366,7 @@ describe('local same-instance SQLite snapshots', () => {
     const future = join(f.root, 'future');
     mkdirSync(future);
     const database = new DatabaseSync(join(future, 'server.sqlite'));
-    database.exec('PRAGMA user_version=8');
+    database.exec('PRAGMA user_version=9');
     database.close();
     const before = readFileSync(join(future, 'server.sqlite'));
     await expect(

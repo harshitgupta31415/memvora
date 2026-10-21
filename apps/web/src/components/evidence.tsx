@@ -4,6 +4,7 @@ import { noteKindLabel } from '@/lib/note-labels';
 import { Icon } from './icon';
 import { DateLabel, StatusBadge } from './ui';
 import journalStyles from './session-journal.module.css';
+import { RawMemoryNotice } from './raw-memory-notice';
 
 export function SessionRow({ session, repository }: { session: Session; repository?: Repository }) {
   return (
@@ -161,6 +162,7 @@ export function MemoryCard({ memory }: { memory: Memory }) {
         <Link href={`/memories/${memory.id}`}>{memory.title}</Link>
       </h3>
       <p className="memory-summary">{memory.summary}</p>
+      <RawMemoryNotice memory={memory} compact />
       <StatusBadge status={memory.outcome} />
       <SourceLinks ids={memory.sources.map((source) => source.id)} sources={memory.sources} />
     </article>

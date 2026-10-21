@@ -6,6 +6,23 @@ The local code now includes SQLite-backed evidence intake, repository/session ro
 
 The local `POST /v1/events/batch` body is validated without type conversion. Nullable execution fields such as `outcome.signal` and `outcome.exitCode` retain their submitted null values; strings that resemble numbers or booleans are rejected where those scalar types are required. This preserves captured observations and exact retry identity. Numeric URL query parsing remains separate. Existing stored evidence is not rewritten by this validation change.
 
+## Implemented local raw-evidence recall
+
+| Protected route            | Current local behavior                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `POST /v1/memories/search` | `SearchRequest` → `{items, requestId}` from scoped stored-summary and accepted-command lexical indexes.   |
+| `GET /v1/memories/:id`     | `{memory}` for an authorized original event UUID, using its stored summary or an observed raw projection. |
+| `POST /v1/ask`             | Cited answer assembled from authorized command evidence, journal entries and bounded imported-code hits.  |
+| `GET /v1/events/:id`       | `{event}` containing the retained `CapturedEvent`, captured output/diffs and completeness metadata.       |
+
+`Memory` now permits optional `representation: raw_event | summary` and `processingStatus: queued | running | ready | failed`. When no stored summary exists, the response sets `representation: raw_event`, `mode: observed` and a label distinguishing captured evidence from a stored/model-generated summary. `processingStatus` is included only when a matching current-generation job exists. A ready job without a stored summary is still labeled as unavailable summary evidence, not fabricated AI output. Stored summaries are returned unchanged and may omit either optional field; clients must not interpret an absent field as a processing failure.
+
+The raw projection keeps the original event UUID, repository/session association and event citations. It is derived during an authorized read transaction; search/detail/Ask do not persist a summary, enqueue/retry enrichment, change processing counts or call an AI provider. Stored summaries take precedence whenever present, even if only original output, arguments or a diff matched the search. Counts of stored memories do not count on-read projections. Bounded summaries/projections can omit matching output from their display; follow the event citation or website `/events/[id]` to inspect the full retained capture and its original truncation flags.
+
+Schema 8 adds/backfills `local_event_fts` for retained redacted command/arguments, cwd, commit SHA, outcome/error fields, output and diffs. New events, intake identity, index entry and job are committed together before acknowledgement. Search quotes bounded query terms for token-based FTS matching, combines at most 100 scoped candidates from each raw/summary index by reciprocal rank, deduplicates by event UUID, then applies the requested result limit (default 10, maximum 20). It does not compare BM25 scores from different indexes directly or promise exact substring/semantic recall.
+
+Current principal/workspace generation and active repository/session scope are checked inside candidate queries and again for detail. An explicit empty `repositoryIds` list returns no command memories; an inaccessible selected repository is denied rather than widening the search. Ask's `sessionId` restriction also scopes command recall; imported-code and journal rules retain their existing separate limits. Deleted parents deny both stored and raw detail. Ask remains cited answer composition, including when a retrieved stored summary used AI; this change adds no read-time model reasoning or provider dependency.
+
 ## Implemented local investigation directory
 
 `POST /v1/sessions/search` reads one scoped directory page. It requires the same local bearer and Host/Origin checks as evidence routes and returns `Cache-Control: no-store`. Its strict JSON body accepts optional `query` (up to 200 characters), `repositoryId` (UUID), `status` (`open` or `closed`), `limit` (1–50, default 20) and `cursor` (1–2,048 characters). URL query fields and unknown body fields are rejected. An empty body object browses all authorized investigations; selectors never grant access.

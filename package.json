@@ -43,6 +43,7 @@
     "backup:local": "node --env-file-if-exists=.env scripts/backup-local.mjs",
     "acceptance:backup": "node scripts/acceptance-backup.mjs",
     "acceptance:outbox": "node scripts/acceptance-outbox.mjs",
+    "acceptance:raw-recall": "node scripts/acceptance-raw-recall.mjs",
     "acceptance:github-oauth": "node scripts/acceptance-github-oauth.mjs"
   },
   "devDependencies": {

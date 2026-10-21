@@ -17,6 +17,18 @@ The web server, CLI and MCP share runtime response contracts and the same local 
 
 Current server persistence is SQLite, not PostgreSQL/pgvector/pg-boss. Default enrichment deterministically organizes observed captured events into labeled memories; it is not a model-generated explanation. Lexical recall also searches the latest imported redacted code snapshot and returns immutable file citations. The optional provider path is separate and remains disabled unless explicitly configured.
 
+Use [OWNER_SETUP.md](OWNER_SETUP.md) for the remaining owner actions: registering and authorizing a real private GitHub App, deliberately enabling an AI provider, and connecting a chosen MCP host. Local capture and recall work without App credentials or AI; GitHub import can use the existing authorized `gh` account when all App settings are absent.
+
+### Recall evidence before a summary is ready
+
+Accepted command evidence is searchable through Ask, CLI `ask` and MCP `search_memory` even when enrichment is queued, running or failed. Search covers the retained redacted command/arguments, working path, commit, outcome/error fields, captured output and diffs. It is token-based lexical retrieval, not semantic matching or guaranteed exact-substring search. Unsynced outbox rows are not in the server index; upload them before expecting recall.
+
+When no stored summary exists, recall returns an observed projection with `representation: raw_event`, an explicit captured-event label and, when known, the current job's `processingStatus`. It retains the original event UUID and citations. `get_memory` resolves that same UUID before enrichment finishes. Reading evidence creates no memory, changes no job state and calls no provider. Stored-memory counts therefore remain counts of persisted summaries, not recall projections.
+
+If a stored summary exists, it takes precedence, including when only the original output or diff matched. Raw and summary hits deduplicate by event UUID before applying the result limit. Repository/session scope and deletion checks apply to search and detail. Displayed output is bounded; follow the original event link at `/events/[id]` for the full retained capture, which can itself have capture truncation. A failed command or later passing command alone does not establish a causal fix. Ask still composes a cited answer from retrieved evidence rather than performing cross-event AI reasoning.
+
+The normal application store upgrades to schema 8 and backfills its raw-evidence index from accepted events. For a recovery point before an upgrade, use [BACKUPS.md](BACKUPS.md); its operator supports schema 7 or 8 without upgrading the source. Implementation instructions and acceptance results remain separate; see [STATUS.md](STATUS.md).
+
 ### Find an older investigation
 
 The Investigations page searches the complete authorized session directory before limiting results. Use a literal title substring, repository and optional open/closed filter; it does not search command/error, journal or imported-code content. Use Ask for those evidence queries. Title matching normalizes Unicode to NFC and lowercase, with punctuation treated literally. The display is bounded to 200 characters; `titleTruncated` indicates that matching text may fall outside the shown prefix. Open/closed describes the investigation state, not whether a fix was verified.
@@ -322,10 +334,10 @@ These are instructions, not a record of passed results. Root verification record
 | Website cannot reach API            | API terminal, loopback URL, matching environment and local token/data directory.                                                   |
 | CLI cannot find credential          | Start API; check `MEMVORA_DATA_DIR`, `MEMVORA_LOCAL_TOKEN` or `--home`. Do not print the token.                                    |
 | API rejects captured event          | Keep pending outbox data; inspect safe error/limits and current shared-package builds. Do not alter an already-sent event payload. |
-| No memory immediately after capture | Allow local background processing; inspect session/raw event and failure state.                                                    |
-| Ask finds nothing                   | Use distinctive recorded text; verify the bound repo/session and that evidence synced.                                             |
+| No stored summary after capture     | Check processing state; accepted raw evidence remains searchable without waiting for enrichment.                                   |
+| Ask finds nothing                   | Use distinctive recorded text; verify bound repo/session and successful sync. Displayed excerpts may omit matching output.         |
 | GitHub unavailable                  | Verify `gh` is installed/authenticated and network is available; restart after changing GitHub identity.                           |
-| AI job fails                        | Confirm deliberate enablement and provider parameter support; raw history should remain.                                           |
+| AI job fails                        | Check provider configuration and job state; accepted raw evidence remains available through recall and original history.           |
 | npm/batch launch differs on Windows | Use Node/npm direct mode or one explicit quoted shell command; interactive programs are unsupported.                               |
 
 Do not delete local data as a routine troubleshooting step. Export/backup useful evidence first and use the intended deletion controls for destructive actions.

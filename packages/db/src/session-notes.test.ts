@@ -643,7 +643,7 @@ describe('append-only scoped investigation notes', () => {
     database(upgraded).exec('PRAGMA user_version=6');
     upgraded.close();
     const reopened = open(store.path);
-    expect(database(reopened).prepare('PRAGMA user_version').get()?.['user_version']).toBe(7);
+    expect(database(reopened).prepare('PRAGMA user_version').get()?.['user_version']).toBe(8);
     expect(reopened.getSessionNote(context, input.id)).toEqual(saved.note);
     expect(reopened.createSessionNote(context, session.id, input)).toEqual({
       note: saved.note,
