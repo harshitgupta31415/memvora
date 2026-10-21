@@ -248,6 +248,9 @@ export default async function LocalSetup({
               >
                 Ask in the website <Icon name="arrow" size={13} />
               </Link>
+              <Link href="/capture-recovery" className="inline-link">
+                Inspect unsynced capture <Icon name="arrow" size={13} />
+              </Link>
             </div>
           </div>
         </section>

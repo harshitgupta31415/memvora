@@ -1,0 +1,62 @@
+.guide {
+  display: grid;
+  gap: 20px;
+}
+.section {
+  padding: 25px;
+  margin-bottom: 24px;
+}
+.guide .section {
+  margin-bottom: 0;
+}
+.section p,
+.states dd {
+  font-size: 12px;
+  line-height: 1.85;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.section p {
+  margin: 14px 0;
+}
+.section code {
+  overflow-wrap: anywhere;
+}
+.section .warning {
+  border-left: 2px solid #dcc392;
+  padding-left: 15px;
+  color: #dcc392;
+}
+.states {
+  margin: 0;
+}
+.states > div {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 18px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+.states dt {
+  font-size: 12px;
+  color: var(--subtle);
+  padding-top: 3px;
+}
+.states dd {
+  margin: 0;
+}
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin-top: 24px;
+}
+@media (max-width: 640px) {
+  .section {
+    padding: 20px;
+  }
+  .states > div {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+}

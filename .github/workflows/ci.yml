@@ -2,7 +2,9 @@ name: Project checks
 
 on:
   push:
+    branches: [harshitgupta31415/main]
   pull_request:
+    branches: [harshitgupta31415/main]
   workflow_dispatch:
 
 permissions:
@@ -32,3 +34,4 @@ jobs:
       - run: npm run acceptance:directory
       - run: npm run acceptance:setup
       - run: npm run acceptance:backup
+      - run: npm run acceptance:outbox

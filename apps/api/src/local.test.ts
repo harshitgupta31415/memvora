@@ -98,6 +98,111 @@ describe('local evidence lifecycle', () => {
     expect(memory.uncertainty.join(' ')).toContain('does not prove');
   });
 
+  it('preserves submitted nulls and scalar types through durable intake, GET and exact UUID retries', async () => {
+    const { app, event, store, service, session } = setup();
+    const captured: CapturedEvent[] = [
+      { ...event(1), outcome: { kind: 'completed', exitCode: 0, signal: null } },
+      {
+        ...event(2),
+        outcome: {
+          kind: 'spawn_failed',
+          exitCode: null,
+          signal: null,
+          error: { code: 'ENOENT', message: 'Synthetic missing executable.' },
+        },
+        capture: { complete: false, truncatedBytes: 0, redacted: true },
+      },
+      {
+        ...event(3),
+        outcome: { kind: 'incomplete', exitCode: null, signal: null },
+        capture: { complete: false, truncatedBytes: 0, redacted: true },
+      },
+      {
+        ...event(4),
+        outcome: { kind: 'interrupted', exitCode: null, signal: 'SIGINT' },
+        capture: { complete: false, truncatedBytes: 0, redacted: true },
+      },
+    ];
+    const wire = JSON.stringify({ schemaVersion: 1, events: captured });
+    for (let retry = 0; retry < 2; retry++) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/events/batch',
+        headers: { ...headers, 'content-type': 'application/json' },
+        payload: wire,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().acknowledgedEventIds).toEqual(captured.map((item) => item.eventId));
+      for (const item of captured)
+        expect(store.getEvent(service.context(), item.eventId)).toEqual(item);
+    }
+    expect(store.dashboard(service.context()).counts).toMatchObject({ events: 4, queuedJobs: 4 });
+    for (const item of captured) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/v1/events/${item.eventId}`,
+        headers,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().event).toEqual(item);
+    }
+    const history = await app.inject({
+      method: 'GET',
+      url: `/v1/sessions/${session.id}/events?limit=2`,
+      headers,
+    });
+    expect(history.statusCode).toBe(200);
+    expect(history.json().events.map((item: CapturedEvent) => item.eventId)).toEqual(
+      captured.slice(-2).map((item) => item.eventId),
+    );
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/v1/sessions/${session.id}/events?limit=2.5`,
+          headers,
+        })
+      ).statusCode,
+    ).toBe(400);
+  });
+
+  it('rejects scalar event-body coercion atomically while leaving existing evidence untouched', async () => {
+    const { app, event, store, service } = setup();
+    const original = event();
+    const variants = [
+      { ...original, sequence: '1' },
+      { ...original, sequence: true },
+      { ...original, outcome: { ...original.outcome, exitCode: '0' } },
+      { ...original, outcome: { ...original.outcome, exitCode: false } },
+      { ...original, outcome: { ...original.outcome, signal: 0 } },
+      { ...original, git: { ...original.git, dirty: 'false' } },
+      { ...original, git: { ...original.git, commitSha: 0 } },
+      { ...original, capture: { ...original.capture, complete: 'true' } },
+      { ...original, capture: { ...original.capture, truncatedBytes: '0' } },
+      { ...original, command: { ...original.command, executable: 123 } },
+      { ...original, command: { ...original.command, args: [123] } },
+    ];
+    for (const invalid of variants) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/events/batch',
+        headers,
+        payload: { schemaVersion: 1, events: [event(2), invalid] },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe('INVALID_REQUEST');
+      expect(store.dashboard(service.context()).counts).toMatchObject({ events: 0, queuedJobs: 0 });
+    }
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/events/batch',
+      headers,
+      payload: { schemaVersion: '1', events: [original] },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(store.dashboard(service.context()).counts.events).toBe(0);
+  });
+
   it('rejects an immutable conflict atomically without accepting another event', async () => {
     const { app, event, service, store } = setup();
     const first = event();

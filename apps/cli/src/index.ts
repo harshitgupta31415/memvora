@@ -2,13 +2,7 @@
 import { Command } from 'commander';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
-import type {
-  EventAck,
-  LocalContext,
-  RecallAnswer,
-  Session,
-  SessionEventsPage,
-} from '@memvora/contracts';
+import type { LocalContext, RecallAnswer, Session, SessionEventsPage } from '@memvora/contracts';
 import { IdSchema, SessionEventsPageSchema, SessionEventsQuerySchema } from '@memvora/contracts';
 import { Check } from 'typebox/value';
 import {
@@ -23,6 +17,8 @@ import {
 } from './local.js';
 import { captureCommand, recoverIncomplete } from './capture.js';
 import { initializeRepository } from './initialization.js';
+import { readExistingOutboxPage } from './outbox-inspection.js';
+import { resolveSyncFilter, synchronizeOutbox } from './outbox-sync.js';
 import { formatSessionRecap, readSessionRecap } from './session-recap.js';
 import {
   readSessionDirectory,
@@ -93,31 +89,55 @@ async function createSession(root: string, binding: Binding, title?: string): Pr
   return updated;
 }
 
-async function synchronize(outbox: LocalOutbox, binding: Binding): Promise<number> {
-  const { origin, token } = connection(binding);
-  let count = 0;
-  for (let batch = 0; batch < 100; batch++) {
-    const selected = outbox.pending();
-    if (!selected.length) return count;
-    const result = await apiRequest<EventAck>(origin, token, '/v1/events/batch', {
-      schemaVersion: 1,
-      events: selected.map((row) => row.payload),
-    });
-    if (
-      !Array.isArray(result.acknowledgedEventIds) ||
-      result.acknowledgedEventIds.some((id) => typeof id !== 'string')
-    )
-      throw new Error('Invalid exact-acknowledgement response. Pending evidence retained.');
-    outbox.acknowledge(
-      result.acknowledgedEventIds,
-      selected.map((row) => row.eventId),
-    );
-    count += result.acknowledgedEventIds.length;
-    if (!result.acknowledgedEventIds.length)
-      throw new Error('API acknowledged no events. Pending evidence retained.');
-  }
-  return count;
+function outboxInteger(value: string | undefined, label: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value)))
+    throw new Error(`Use a positive safe integer for ${label}.`);
+  return Number(value);
 }
+
+program
+  .command('outbox')
+  .description('Inspect existing local capture metadata without API access or recovery.')
+  .command('list')
+  .option('--directory <path>', 'Capture project directory; bypass binding discovery')
+  .option('--state <state>', 'unsynced, pending, incomplete, synced or all', 'unsynced')
+  .option('--session <uuid>', 'Only this local investigation UUID')
+  .option('--limit <count>', 'Rows per page, from 1 to 50', '20')
+  .option('--after <row-id>', 'nextAfter from the previous page; live oldest-first pagination')
+  .action(
+    (options: {
+      directory?: string;
+      state: string;
+      session?: string;
+      limit: string;
+      after?: string;
+    }) => {
+      const limit = outboxInteger(options.limit, '--limit');
+      const after = outboxInteger(options.after, '--after');
+      if (limit !== undefined && limit > 50) throw new Error('Use --limit from 1 to 50.');
+      if (options.session !== undefined && !Check(IdSchema, options.session))
+        throw new Error('Use a valid local session UUID.');
+      if (!['unsynced', 'pending', 'incomplete', 'synced', 'all'].includes(options.state))
+        throw new Error('Use --state unsynced, pending, incomplete, synced or all.');
+      const root = options.directory ?? findBindingDirectory();
+      if (!root)
+        throw new Error('No capture binding found. Use --directory <capture-project-directory>.');
+      console.log(
+        JSON.stringify(
+          readExistingOutboxPage({
+            root,
+            state: options.state as 'unsynced' | 'pending' | 'incomplete' | 'synced' | 'all',
+            ...(options.session ? { sessionId: options.session } : {}),
+            ...(limit !== undefined ? { limit } : {}),
+            ...(after !== undefined ? { after } : {}),
+          }),
+          null,
+          2,
+        ),
+      );
+    },
+  );
 
 program
   .command('status')
@@ -368,7 +388,7 @@ program
     const { token } = connection(binding);
     const { outbox, path } = openOutbox(root);
     try {
-      const recovered = recoverIncomplete(outbox);
+      const recovered = recoverIncomplete(outbox, { sessionId: binding.sessionId! });
       if (recovered) console.error(`Recovered ${recovered} interrupted capture(s) as incomplete.`);
       const result = await captureCommand({
         cwd: process.cwd(),
@@ -382,7 +402,12 @@ program
       });
       process.exitCode = result.exitCode >= 0 && result.exitCode <= 255 ? result.exitCode : 1;
       try {
-        console.error(`Synced ${await synchronize(outbox, binding)} event(s).`);
+        const synced = await synchronizeOutbox(outbox, binding, connection(binding), {
+          eventId: result.eventId,
+        });
+        console.error(
+          `Acknowledged ${synced.acknowledgedEvents} event(s); ${synced.totalRemaining.pending} finalized event(s) remain pending in the local outbox.`,
+        );
       } catch (error) {
         console.error(
           `Sync deferred; evidence remains local: ${error instanceof Error ? error.message : 'API unavailable'}`,
@@ -396,13 +421,25 @@ program
 program
   .command('sync')
   .description('Retry immutable pending events; acknowledge only exact committed IDs.')
-  .action(async () => {
+  .option('--session <uuid>', 'Only finalized pending events from this local investigation')
+  .option('--event <uuid>', 'Only this finalized pending event; mutually exclusive with --session')
+  .action(async (options: { session?: string; event?: string }) => {
+    const filter = resolveSyncFilter(options.session, options.event);
     const { root, binding } = bound();
+    const access = connection(binding);
     const { outbox } = openOutbox(root);
     try {
-      const recovered = recoverIncomplete(outbox);
+      // Selected retries never probe or finalize unrelated unfinished captures.
+      const recoveredIncompleteCaptures = filter ? 0 : recoverIncomplete(outbox);
       console.log(
-        `Synced ${await synchronize(outbox, binding)} event(s); ${recovered} incomplete capture(s) recovered.`,
+        JSON.stringify(
+          {
+            ...(await synchronizeOutbox(outbox, binding, access, filter)),
+            recoveredIncompleteCaptures,
+          },
+          null,
+          2,
+        ),
       );
     } finally {
       outbox.close();

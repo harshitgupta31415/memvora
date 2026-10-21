@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import type { CapturedEvent } from '@memvora/contracts';
-import { LocalOutbox } from './local.js';
+import { LocalOutbox, type OutboxFilter } from './local.js';
 import { redactArguments, redactText, StreamRedactor } from './redaction.js';
 
 const OUTPUT_LIMIT = 128 * 1024;
@@ -370,8 +370,8 @@ export async function captureCommand(options: {
   return { eventId, exitCode: outcome.exitCode ?? (outcome.kind === 'interrupted' ? 130 : 127) };
 }
 
-export function recoverIncomplete(outbox: LocalOutbox): number {
-  const rows = outbox.incomplete();
+export function recoverIncomplete(outbox: LocalOutbox, filter?: OutboxFilter): number {
+  const rows = outbox.incomplete(filter);
   let recovered = 0;
   for (const row of rows) {
     // Unknown legacy owners, EPERM, and reused live PIDs are deliberately left alone.

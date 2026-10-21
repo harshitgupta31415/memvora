@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Check } from 'typebox/value';
 import {
   EventAckSchema,
+  IdSchema,
   MeSchema,
   RecallAnswerSchema,
   RepositoryListSchema,
@@ -18,6 +19,74 @@ export interface Binding {
   repositoryId: string;
   sessionId?: string;
   apiUrl: string;
+}
+
+export interface OutboxFilter {
+  sessionId?: string;
+  eventId?: string;
+}
+function outboxSelection(filter: OutboxFilter | undefined): {
+  clause: string;
+  values: string[];
+  filtered: boolean;
+} {
+  if (filter === undefined) return { clause: '', values: [], filtered: false };
+  if (
+    !filter ||
+    typeof filter !== 'object' ||
+    Array.isArray(filter) ||
+    ![Object.prototype, null].includes(Object.getPrototypeOf(filter)) ||
+    Object.keys(filter).some((key) => !['sessionId', 'eventId'].includes(key)) ||
+    (filter.sessionId !== undefined && !Check(IdSchema, filter.sessionId)) ||
+    (filter.eventId !== undefined && !Check(IdSchema, filter.eventId)) ||
+    (filter.sessionId !== undefined && filter.eventId !== undefined)
+  )
+    throw new Error('Use one valid local session or event UUID to select outbox evidence.');
+  if (filter.sessionId !== undefined)
+    return { clause: ' AND session_id=?', values: [filter.sessionId], filtered: true };
+  if (filter.eventId !== undefined)
+    return { clause: ' AND id=?', values: [filter.eventId], filtered: true };
+  return { clause: '', values: [], filtered: false };
+}
+function selectedPayload(
+  value: unknown,
+  row: Record<string, unknown>,
+  finalized: boolean,
+): Record<string, unknown> {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    !('eventId' in value) ||
+    value.eventId !== row['id'] ||
+    !('sessionId' in value) ||
+    value.sessionId !== row['session_id'] ||
+    (finalized && (!('sequence' in value) || value.sequence !== row['sequence']))
+  )
+    throw new Error(
+      'Selected local evidence has inconsistent stored identity. Evidence was retained.',
+    );
+  return value as Record<string, unknown>;
+}
+function parseSelectedPayload(
+  text: string,
+  row: Record<string, unknown>,
+  finalized: boolean,
+): Record<string, unknown> {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error('Selected local evidence has invalid stored metadata. Evidence was retained.');
+  }
+  return selectedPayload(value, row, finalized);
+}
+function parseStoredPayload(text: string): Record<string, unknown> {
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    throw new Error('Stored local evidence contains invalid JSON metadata. Evidence was retained.');
+  }
 }
 
 export const sourceProjectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -226,69 +295,121 @@ export class LocalOutbox {
       .run(JSON.stringify(payload), eventId);
   }
 
-  incomplete(): Array<{
+  incomplete(filter?: OutboxFilter): Array<{
     eventId: string;
     sequence: number;
     ownerPid: number | null;
     initial: Record<string, unknown>;
   }> {
+    const selection = outboxSelection(filter);
     return this.db
-      .prepare('SELECT id,sequence,owner_pid,initial_payload FROM executions WHERE payload IS NULL')
-      .all()
+      .prepare(
+        `SELECT id,session_id,sequence,owner_pid,${selection.filtered ? 'CASE WHEN length(CAST(initial_payload AS BLOB))<=262144 THEN initial_payload ELSE NULL END AS initial_payload' : 'initial_payload'} FROM executions WHERE payload IS NULL${selection.clause}`,
+      )
+      .all(...selection.values)
       .map((row) => ({
         eventId: String(row['id']),
         sequence: Number(row['sequence']),
         ownerPid: row['owner_pid'] === null ? null : Number(row['owner_pid']),
-        initial: JSON.parse(String(row['initial_payload'])) as Record<string, unknown>,
+        initial: selection.filtered
+          ? parseSelectedPayload(String(row['initial_payload']), row, false)
+          : parseStoredPayload(String(row['initial_payload'])),
       }));
   }
 
-  pending(): Array<{ eventId: string; payload: Record<string, unknown> }> {
+  pending(
+    filter?: OutboxFilter,
+    upToRowId?: number,
+  ): Array<{
+    eventId: string;
+    sessionId: string;
+    sequence: number;
+    payload: Record<string, unknown>;
+  }> {
+    const selection = outboxSelection(filter);
+    if (upToRowId !== undefined && (!Number.isSafeInteger(upToRowId) || upToRowId < 0))
+      throw new Error('The local outbox intake cutoff must be a nonnegative safe integer.');
     const rows = this.db
       .prepare(
-        'SELECT id,payload FROM executions WHERE synced=0 AND payload IS NOT NULL ORDER BY created_at,id LIMIT 50',
+        `SELECT id,session_id,sequence,length(CAST(payload AS BLOB)) AS payload_bytes,CASE WHEN length(CAST(payload AS BLOB))<=1900000 THEN payload ELSE NULL END AS payload FROM executions WHERE synced=0 AND payload IS NOT NULL${selection.clause}${upToRowId === undefined ? '' : ' AND rowid<=?'} ORDER BY created_at,id LIMIT 50`,
       )
-      .all();
+      .iterate(...selection.values, ...(upToRowId === undefined ? [] : [upToRowId]));
     let bytes = 128;
-    const selected: Array<{ eventId: string; payload: Record<string, unknown> }> = [];
+    let found = false;
+    const selected: Array<{
+      eventId: string;
+      sessionId: string;
+      sequence: number;
+      payload: Record<string, unknown>;
+    }> = [];
     for (const row of rows) {
-      const payload = String(row['payload']);
-      const size = Buffer.byteLength(payload, 'utf8') + 1;
+      found = true;
+      const payloadBytes = row['payload_bytes'];
+      if (
+        typeof payloadBytes !== 'number' ||
+        !Number.isSafeInteger(payloadBytes) ||
+        payloadBytes < 0
+      )
+        throw new Error('Stored local evidence has invalid transport size. Evidence was retained.');
+      const size = payloadBytes + 1;
       if (bytes + size > 1_900_000) break;
+      const payload = String(row['payload']);
       bytes += size;
       selected.push({
         eventId: String(row['id']),
-        payload: JSON.parse(payload) as Record<string, unknown>,
+        sessionId: String(row['session_id']),
+        sequence: Number(row['sequence']),
+        payload: selection.filtered
+          ? parseSelectedPayload(payload, row, true)
+          : parseStoredPayload(payload),
       });
     }
-    if (rows.length && !selected.length)
+    if (found && !selected.length)
       throw new Error('A pending event exceeds the upload limit; it remains stored locally.');
     return selected;
   }
 
-  acknowledge(ids: readonly string[], uploadedIds: readonly string[]): void {
+  lastRowId(): number {
+    const rowId = this.db
+      .prepare('SELECT coalesce(max(rowid),0) AS row_id FROM executions')
+      .get()?.['row_id'];
+    if (typeof rowId !== 'number' || !Number.isSafeInteger(rowId) || rowId < 0)
+      throw new Error('The local outbox intake boundary is invalid. Evidence was retained.');
+    return rowId;
+  }
+
+  acknowledge(ids: readonly string[], uploadedIds: readonly string[]): number {
     const allowed = new Set(uploadedIds);
+    if (new Set(ids).size !== ids.length || allowed.size !== uploadedIds.length)
+      throw new Error('Duplicate event identities cannot acknowledge local evidence.');
     if (ids.some((id) => !allowed.has(id)))
       throw new Error('API acknowledged an event outside the uploaded batch.');
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      let changed = 0;
       for (const id of ids)
-        this.db
-          .prepare('UPDATE executions SET synced=1 WHERE id=? AND payload IS NOT NULL')
-          .run(id);
+        changed += Number(
+          this.db
+            .prepare(
+              'UPDATE executions SET synced=1 WHERE id=? AND payload IS NOT NULL AND synced=0',
+            )
+            .run(id).changes,
+        );
       this.db.exec('COMMIT');
+      return changed;
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
     }
   }
 
-  counts(): { pending: number; incomplete: number } {
+  counts(filter?: OutboxFilter): { pending: number; incomplete: number } {
+    const selection = outboxSelection(filter);
     const row = this.db
       .prepare(
-        'SELECT SUM(CASE WHEN synced=0 AND payload IS NOT NULL THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN payload IS NULL THEN 1 ELSE 0 END) AS incomplete FROM executions',
+        `SELECT SUM(CASE WHEN synced=0 AND payload IS NOT NULL THEN 1 ELSE 0 END) AS pending, SUM(CASE WHEN payload IS NULL THEN 1 ELSE 0 END) AS incomplete FROM executions WHERE 1${selection.clause}`,
       )
-      .get();
+      .get(...selection.values);
     return { pending: Number(row?.['pending'] ?? 0), incomplete: Number(row?.['incomplete'] ?? 0) };
   }
 

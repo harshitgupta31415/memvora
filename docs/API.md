@@ -4,6 +4,8 @@ This document retains the original **hosted-target contract plan**. It is not th
 
 The local code now includes SQLite-backed evidence intake, repository/session routes, observed memories, cited ask, a real command wrapper and read-only MCP retrieval tools. It uses a trusted-machine loopback credential, not the hosted login/pairing system described below. GitHub browsing/import supports an optional private GitHub App user connection or, only with all App settings absent, an explicit local `gh` bridge. AI is optional and disabled by default. Integration and acceptance results remain separately recorded. Shared runtime validation continues through `packages/contracts`.
 
+The local `POST /v1/events/batch` body is validated without type conversion. Nullable execution fields such as `outcome.signal` and `outcome.exitCode` retain their submitted null values; strings that resemble numbers or booleans are rejected where those scalar types are required. This preserves captured observations and exact retry identity. Numeric URL query parsing remains separate. Existing stored evidence is not rewritten by this validation change.
+
 ## Implemented local investigation directory
 
 `POST /v1/sessions/search` reads one scoped directory page. It requires the same local bearer and Host/Origin checks as evidence routes and returns `Cache-Control: no-store`. Its strict JSON body accepts optional `query` (up to 200 characters), `repositoryId` (UUID), `status` (`open` or `closed`), `limit` (1–50, default 20) and `cursor` (1–2,048 characters). URL query fields and unknown body fields are rejected. An empty body object browses all authorized investigations; selectors never grant access.
@@ -307,6 +309,12 @@ A locator is an application source reference, not an arbitrary URL the model inv
 | `memvora config`                     | Inspect/edit safe configuration and exclusions. Never print raw credentials.            |
 
 Document which commands the starter actually implements. A placeholder should fail with a clear not-implemented message, never simulate successful capture, auth or synchronization.
+
+The local implementation also provides offline `memvora outbox list --directory <capture-folder>` with `--state unsynced|pending|incomplete|synced|all`, optional `--session <UUID>`, `--limit 1..50` (default 20), and `--after <positive-row-id>` from `page.nextAfter`. It opens only an existing local outbox without API credentials, capture recovery, bootstrap or migration. Output contains bounded metadata, scoped state totals, and live oldest-row-first pagination. It does not expose command arguments, output or diffs. An incomplete row can belong to a running process; a synced row records a local acknowledgement rather than proof of current server retention.
+
+`memvora sync --session <UUID>` or `memvora sync --event <UUID>` selects finalized pending evidence before parsing or batch admission. Selectors are mutually exclusive and never alter a binding, event identity or server authorization. Selected retries leave unfinished captures alone. No-selector sync retains all-pending retry and confirmed-dead-owner recovery. Every payload must match its stored event/session/sequence and the bound repository; no automatic reassignment or skipped-row success is permitted. `run` scopes automatic upload to its newly captured event, so an unrelated rejected backlog does not block that attempt.
+
+Sync snapshots the current maximum local row ID and sends up to 100 batches of at most 50 events within the existing byte budget. New rows beyond that cutoff remain pending. This is a row cutoff, not a frozen payload-finalization snapshot. JSON results expose `acknowledgedEvents` (actual local pending-to-acknowledged transitions), `remaining`, `totalRemaining`, `startedAtRowId`, `scope`, `stopReason` and `recoveredIncompleteCaptures`. A batch-limit result does not mean all evidence was uploaded. Only unique UUID acknowledgements inside the exact uploaded batch can change local flags; empty, duplicate, foreign or malformed acknowledgements leave that response's rows pending. Earlier valid partial acknowledgements remain durable if a later request fails. See [OUTBOX_RECOVERY.md](OUTBOX_RECOVERY.md).
 
 ## MCP tools
 

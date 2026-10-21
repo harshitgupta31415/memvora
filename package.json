@@ -42,6 +42,7 @@
     "acceptance:setup": "node scripts/acceptance-setup.mjs",
     "backup:local": "node --env-file-if-exists=.env scripts/backup-local.mjs",
     "acceptance:backup": "node scripts/acceptance-backup.mjs",
+    "acceptance:outbox": "node scripts/acceptance-outbox.mjs",
     "acceptance:github-oauth": "node scripts/acceptance-github-oauth.mjs"
   },
   "devDependencies": {

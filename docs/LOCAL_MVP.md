@@ -203,6 +203,12 @@ node $memvoraCli status
 
 An unavailable API during auto-sync does not discard finalized local evidence. First binding/session creation still requires the API. If a command fails, the wrapper preserves its failure status where representable even if capture succeeded.
 
+### Inspect a local outbox and sync one selection
+
+Use `/capture-recovery` for manual PowerShell command generation, or follow [OUTBOX_RECOVERY.md](OUTBOX_RECOVERY.md). `outbox list --directory <absolute-capture-folder>` reads existing local metadata without a token, API, initialization, migration or crash recovery; it never opens the server database. It defaults to the oldest 20 `unsynced` rows and supports state/session filters plus a positive `--after` row ID. Unsynced combines finalized pending rows and unfinished captures; an incomplete row may still have a live owner. Synced means an exact acknowledgement was recorded locally, not that later server access/deletion is unchanged. Listing is logically read-only, though SQLite can manage lock sidecars.
+
+`sync --session <UUID>` or `sync --event <UUID>` attempts one mutually exclusive selection from the original bound capture folder. An older rejected event need not block an unrelated selected upload. Selected sync does not recover unfinished executions, change IDs/content, force acknowledgements or recreate deleted server records. Its JSON result separates acknowledged evidence and selected/global remaining counts; later-created rows are outside its start boundary. Auto-sync after `run` targets the new event. Ordinary unfiltered sync retains conservative confirmed-dead recovery. The raw local outbox remains private and is excluded from server-only backups; preserve it rather than deleting or reassigning rejected evidence.
+
 Current conservative capture limits are 128 KiB persisted output per command, 32 KiB per before/after tracked diff, a bounded output-chunk count and a 16 KiB line buffer. Overlong lines are suppressed and count toward truncation; output loss makes capture incomplete. The local database has a 500 MiB admission cap. Output continues draining after persistence caps. Unsynced data is not silently evicted. File capture does not include untracked contents; tracked sensitive paths are excluded from diff snapshots.
 
 Known credential patterns, the local token, password/token arguments and private-key blocks are redacted before local storage/display. Redaction is imperfect; avoid commands that print private credentials. Capture children do not inherit Memvora's `MEMVORA_LOCAL_TOKEN`, `AI_API_KEY`, `GITHUB_CLIENT_SECRET`, `GITHUB_WEBHOOK_SECRET` or `GITHUB_PRIVATE_KEY` variables. The child's own application credentials require its usual explicit configuration.
@@ -222,6 +228,7 @@ Known credential patterns, the local token, password/token arguments and private
 | `/ask`                    | Source-linked recall with repository filtering.                              |
 | `/jobs`                   | Scoped processing states, attempt history and explicit failed-summary retry. |
 | `/settings`               | Actual local storage/enrichment settings, limits and connection diagnostics. |
+| `/capture-recovery`       | Manual offline outbox-list and selected-sync command guide.                  |
 
 The first-run workspace is empty. Counts and memories reflect stored data, not showcase samples. Processing may briefly lag ingestion. A failed provider job leaves raw event detail available. Open Memory processing to filter by repository, investigation or state. Failed summaries can be retried explicitly after fixing their configuration; running, queued and ready jobs cannot be reset. Each cycle has three automatic attempts, and manual retry counts remain visible. A retry uses the same accepted evidence and the current summary configuration, which can send it to a configured AI endpoint again.
 

@@ -36,6 +36,8 @@ Tests should verify meaningful behavior: event deduplication, access control, st
 
 ## Finish with a useful handoff
 
+Deliver changes through a feature branch and pull request into `harshitgupta31415/main`. Use the developer's identity and keep the repository private. The user has authorized creating and merging these PRs without another approval request. Inspect the diff and complete applicable local validation, then create a PR with the concrete behavior, verification and remaining limits. Wait for the latest PR revision's required CI jobs to pass and merge that reviewed commit without bypassing protections or failed checks. Update the local integration branch safely and include the PR link in the handoff. These instructions also apply to documentation and workflow changes; do not resume direct feature pushes to the integration branch.
+
 Ask the assistant to report the resulting behavior, changed interfaces, checks and outcomes, setup prerequisites, current limitations, and the next concrete task. Keep implemented behavior distinct from the roadmap. Update maintained documentation when a decision changes rather than accumulating contradictory notes in chat.
 
 Use the developer's existing identity for branches, commits, and pull requests as described in `AGENTS.md`. The local skills do not introduce publishing permissions or approval gates for routine work already authorized by the user.

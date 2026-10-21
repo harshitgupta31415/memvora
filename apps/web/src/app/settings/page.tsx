@@ -103,6 +103,11 @@ export default async function Settings({
             <Link href="/backups" className="inline-link">
               Create and verify a manual backup <Icon name="arrow" size={13} />
             </Link>
+            <p className="settings-help">
+              <Link href="/capture-recovery" className="inline-link">
+                Inspect and selectively sync local capture <Icon name="arrow" size={13} />
+              </Link>
+            </p>
           </section>
           <section className="panel settings-panel">
             <h2>
